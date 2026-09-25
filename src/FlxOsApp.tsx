@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { RealEstateLeafletMap } from "./components/RealEstateLeafletMap";
+import { HostelDetailPage } from "./components/HostelDetailPage";
 import type { Property } from "./types";
 import {
   Activity,
@@ -1071,6 +1072,10 @@ function ProfileModal({
 }
 
 export default function FlxOsApp() {
+  if (window.location.pathname === '/hostel/milimani') {
+    return <HostelDetailPage />;
+  }
+
   const emptyClientDashboard: ClientDashboard = { stats: [], reminders: [], tickets: [] };
   const emptyAgentDashboard: AgentDashboard = { stats: [], leads: [], deals: [], contracts: [] };
   const emptyOwnerDashboard: OwnerDashboard = { portfolio: { totalRevenue: 'TZS 0', occupancy: '0%', paymentBalance: 'TZS 0', units: [] }, maintenance: [] };
