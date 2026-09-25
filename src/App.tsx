@@ -247,7 +247,7 @@ function App() {
     password: 'admin123',
   });
 
-  const apiBase = 'http://localhost:3001';
+  const apiBase = '';
   const userInitials = (accountUser.name || 'FLX User').split(' ').slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'FLX';
 
   const openProfileEditor = () => {
@@ -875,7 +875,7 @@ function App() {
     );
 
     try {
-      const response = await fetch('http://localhost:3001/api/saved', {
+      const response = await fetch('/api/saved', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: 'admin@flx.local', propertyId: id }),

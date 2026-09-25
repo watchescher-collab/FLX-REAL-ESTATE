@@ -1122,7 +1122,7 @@ export default function FlxOsApp() {
   }, [role]);
 
   useEffect(() => {
-    fetch("http://localhost:3001/api/properties")
+    fetch("/api/properties")
       .then((response) => (response.ok ? response.json() : null))
       .then((payload) => {
         if (payload?.properties?.length) setListings(payload.properties);
@@ -1130,10 +1130,10 @@ export default function FlxOsApp() {
       .catch(() => undefined);
 
     Promise.all([
-      fetch("http://localhost:3001/api/client/dashboard"),
-      fetch("http://localhost:3001/api/agent/dashboard"),
-      fetch("http://localhost:3001/api/owner"),
-      fetch("http://localhost:3001/api/ops/dashboard"),
+      fetch("/api/client/dashboard"),
+      fetch("/api/agent/dashboard"),
+      fetch("/api/owner"),
+      fetch("/api/ops/dashboard"),
     ])
       .then(async ([clientRes, agentRes, ownerRes, opsRes]) => {
         const clientPayload = clientRes.ok ? await clientRes.json() : emptyClientDashboard;
@@ -1149,7 +1149,7 @@ export default function FlxOsApp() {
   }, []);
 
   const handleAddTicket = (title: string, status: string, eta: string) => {
-    fetch('http://localhost:3001/api/client/tickets', {
+    fetch('/api/client/tickets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, status, eta }),
@@ -1175,7 +1175,7 @@ export default function FlxOsApp() {
             : item,
         ),
       };
-      fetch('http://localhost:3001/api/client/dashboard', {
+      fetch('/api/client/dashboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextDashboard),
@@ -1185,7 +1185,7 @@ export default function FlxOsApp() {
   };
 
   const handleAddLead = (title: string, note: string) => {
-    fetch('http://localhost:3001/api/agent/leads', {
+    fetch('/api/agent/leads', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, note }),
@@ -1205,7 +1205,7 @@ export default function FlxOsApp() {
           lead.id === leadId ? { ...lead, note: `${lead.note} • Reviewed in the live CRM.` } : lead,
         ),
       };
-      fetch('http://localhost:3001/api/agent/dashboard', {
+      fetch('/api/agent/dashboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextDashboard),
@@ -1222,7 +1222,7 @@ export default function FlxOsApp() {
           deal.id === dealId ? { ...deal, status: 'Reviewed' } : deal,
         ),
       };
-      fetch('http://localhost:3001/api/agent/dashboard', {
+      fetch('/api/agent/dashboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextDashboard),
@@ -1232,7 +1232,7 @@ export default function FlxOsApp() {
   };
 
   const handleAddUnit = (name: string, label: string, value: string, status: string) => {
-    fetch('http://localhost:3001/api/owner/units', {
+    fetch('/api/owner/units', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, label, value, status }),
@@ -1265,7 +1265,7 @@ export default function FlxOsApp() {
           ),
         },
       };
-      fetch('http://localhost:3001/api/owner', {
+      fetch('/api/owner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextDashboard),
@@ -1275,7 +1275,7 @@ export default function FlxOsApp() {
   };
 
   const handleAddIncident = (title: string, summary: string, action: string) => {
-    fetch('http://localhost:3001/api/ops/incidents', {
+    fetch('/api/ops/incidents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, summary, action }),
@@ -1293,7 +1293,7 @@ export default function FlxOsApp() {
         ...current,
         maintenance: [{ title, location, state }, ...(current.maintenance ?? [])],
       };
-      fetch('http://localhost:3001/api/owner', {
+      fetch('/api/owner', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextDashboard),
@@ -1308,7 +1308,7 @@ export default function FlxOsApp() {
         ...current,
         queue: [{ label, status, details }, ...(current.queue ?? [])],
       };
-      fetch('http://localhost:3001/api/ops/dashboard', {
+      fetch('/api/ops/dashboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextDashboard),
@@ -1327,7 +1327,7 @@ export default function FlxOsApp() {
           flags: 'Resolved • 100% reconciled',
         },
       };
-      fetch('http://localhost:3001/api/ops/dashboard', {
+      fetch('/api/ops/dashboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextDashboard),
@@ -1345,7 +1345,7 @@ export default function FlxOsApp() {
           flags: 'Funds released • 100% reconciled',
         },
       };
-      fetch('http://localhost:3001/api/ops/dashboard', {
+      fetch('/api/ops/dashboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(nextDashboard),

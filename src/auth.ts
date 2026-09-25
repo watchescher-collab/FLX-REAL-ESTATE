@@ -8,7 +8,7 @@ export type SessionUser = {
 };
 
 export async function signIn(email: string, password: string) {
-  const response = await fetch('http://localhost:3001/api/auth/login', {
+  const response = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -25,7 +25,7 @@ export async function signIn(email: string, password: string) {
 }
 
 export async function registerUser(name: string, email: string, password: string, role = 'Client') {
-  const response = await fetch('http://localhost:3001/api/auth/register', {
+  const response = await fetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, email, password, role }),
@@ -48,7 +48,7 @@ export function getStoredToken() {
 export function signOut() {
   const token = getStoredToken();
   if (token) {
-    fetch('http://localhost:3001/api/auth/logout', {
+    fetch('/api/auth/logout', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -65,7 +65,7 @@ export async function fetchSessionUser(): Promise<SessionUser | null> {
   const token = getStoredToken();
   if (!token) return null;
 
-  const response = await fetch('http://localhost:3001/api/auth/session', {
+  const response = await fetch('/api/auth/session', {
     headers: { Authorization: `Bearer ${token}` },
   });
 
