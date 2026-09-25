@@ -1,9 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap');
+
 .owner-reference-panel { min-width: 0; }
 .owner-reference-table-wrap { max-width: 100%; min-width: 0; }
 .owner-reference-grid, .owner-reference-left, .owner-reference-right { min-width: 0; }
 .owner-reference-grid { align-items: stretch; }
 @media (max-width: 760px) { .owner-reference-grid { align-items: stretch !important; }.owner-reference-left, .owner-reference-right { width: 100% !important; } }
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&display=swap');
 
 :root {
   --crimson: #c67c3e;
