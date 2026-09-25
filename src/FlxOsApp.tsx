@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { RealEstateLeafletMap } from "./components/RealEstateLeafletMap";
 import { HostelDetailPage } from "./components/HostelDetailPage";
 import { MarketplaceReferencePage } from "./components/MarketplaceReferencePage";
+import { OwnerDashboardReferencePage } from "./components/OwnerDashboardReferencePage";
 import type { Property } from "./types";
 import {
   Activity,
@@ -1075,6 +1076,10 @@ function ProfileModal({
 export default function FlxOsApp() {
   if (window.location.pathname === '/hostel/milimani') {
     return <HostelDetailPage />;
+  }
+
+  if (window.location.pathname === '/owner' || window.location.pathname === '/owner/dashboard') {
+    return <OwnerDashboardReferencePage />;
   }
 
   if (window.location.pathname === '/' || window.location.pathname === '/marketplace') {
