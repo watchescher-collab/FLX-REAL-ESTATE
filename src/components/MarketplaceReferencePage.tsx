@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowRight,
   Bell,
@@ -80,7 +81,7 @@ const toMapProperty = (listing: MarketListing): Property => ({
   title: listing.title,
   property_type: listing.type === 'Land' || listing.type === 'Commercial' ? 'Invest' : 'Live',
   status: 'Approved',
-  price: Number(listing.price.replace(/[^0-9]/g, '')) || 0,
+  price: parseMarketplacePrice(listing.price),
   video_url: '',
   thumbnail_url: listing.image,
   images: [listing.image],
@@ -89,6 +90,18 @@ const toMapProperty = (listing: MarketListing): Property => ({
   metadata: { beds: listing.type === 'Student Living' ? 4 : 0, baths: 2, sqft: listing.type === 'Land' ? 800 : 2300 },
   description: listing.description,
 });
+
+export function parseMarketplacePrice(price: string | number): number {
+  const normalizedPrice = String(price).toLowerCase().replace(/,/g, '');
+  const amount = Number(normalizedPrice.match(/\d+(?:\.\d+)?/)?.[0] ?? 0);
+  if (/\d\s*(?:k|thousand)\b/.test(normalizedPrice)) return amount * 1000;
+  if (/\d\s*(?:m|million)\b/.test(normalizedPrice)) return amount * 1_000_000;
+  return amount;
+}
+
+export function getFallbackMarketplaceMapProperties(): Property[] {
+  return fallbackListings.map(toMapProperty);
+}
 
 export function MarketplaceAccountAccess({ role, variant = 'marketplace' }: { role: 'Client' | 'Owner'; variant?: 'marketplace' | 'owner' }) {
   const { user, signOut } = useAuth();
@@ -121,7 +134,7 @@ export function MarketplaceAccountAccess({ role, variant = 'marketplace' }: { ro
     <button className={variant === 'owner' ? 'market-account-owner-trigger' : 'market-reference-avatar'} type="button" aria-label="Open profile and workspace menu" onClick={() => { setIsOpen(true); setNotice(''); }}>
       {variant === 'owner' ? <><span className="market-account-owner-initials">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span><b>{profile.name}<small>Property owner</small></b><ChevronDown size={14} /></> : profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
     </button>
-    {isOpen && <div className="market-account-backdrop" onClick={() => setIsOpen(false)}>
+    {isOpen && createPortal(<div className="market-account-backdrop" onClick={() => setIsOpen(false)}>
       <section className="market-account-modal" role="dialog" aria-modal="true" aria-labelledby="market-account-title" onClick={(event) => event.stopPropagation()}>
         <header><div><span>FLX ACCOUNT</span><h2 id="market-account-title">Profile & workspaces</h2></div><button type="button" aria-label="Close profile" onClick={() => setIsOpen(false)}><X size={18} /></button></header>
         <div className="market-account-identity"><span>{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span><div><strong>{profile.name}</strong><small>{profile.email} · {role} profile</small></div></div>
@@ -140,7 +153,7 @@ export function MarketplaceAccountAccess({ role, variant = 'marketplace' }: { ro
         ] as const).map(([nextRole, label, Icon]) => <button type="button" key={nextRole} onClick={() => openWorkspace(nextRole)}><Icon size={16} /><span>{label}</span><ArrowRight size={14} /></button>)}</div>
         <button className="market-account-signout" type="button" onClick={handleSignOut}><LogOut size={15} /> Sign out and return to marketplace</button>
       </section>
-    </div>}
+    </div>, document.body)}
   </>;
 }
 

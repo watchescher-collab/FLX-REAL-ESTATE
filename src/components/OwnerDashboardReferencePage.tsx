@@ -19,6 +19,7 @@ import {
   Landmark,
   LockKeyhole,
   Menu,
+  MapPin,
   MoreHorizontal,
   Plus,
   Search,
@@ -31,13 +32,19 @@ import {
   X,
   Zap,
 } from 'lucide-react';
-import { MarketplaceAccountAccess } from './MarketplaceReferencePage';
+import { getFallbackMarketplaceMapProperties, MarketplaceAccountAccess, parseMarketplacePrice } from './MarketplaceReferencePage';
+import { RealEstateLeafletMap } from './RealEstateLeafletMap';
+import type { Property } from '../types';
+import './ownerDealPipeline.css';
 
 type Notice = { tone: 'success' | 'error'; message: string } | null;
 type Unit = { name: string; label: string; value: string; status: string };
 type Dashboard = { totalRevenue: string; occupancy: string; paymentBalance: string; propertiesCount: number };
 type OwnerData = { portfolio?: { totalRevenue: string; occupancy: string; paymentBalance: string; units: Unit[] }; maintenance?: Array<{ title: string; location: string; state: string }> };
-type AgentData = { deals?: Array<{ id: number; title: string; status: string; amount: string; note: string }>; leads?: Array<{ id: number; title: string; note: string }> };
+type OwnerDeal = { id: number; title: string; status: string; amount?: string; note?: string };
+type AgentData = { deals?: OwnerDeal[]; leads?: Array<{ id: number; title: string; note: string }> };
+type OwnerListingRow = Record<string, unknown>;
+type OwnerSearchResult = { id: string; kind: 'Deal' | 'Unit'; title: string; detail: string; workspace: string };
 
 const fallbackUnits: Unit[] = [
   { name: 'Room 102-A', label: 'Mlimani Comfort Hostel', value: 'TZS 1,200,000', status: 'Move-in Pending' },
@@ -47,11 +54,45 @@ const fallbackUnits: Unit[] = [
 ];
 
 const summaryFallback: Dashboard = { totalRevenue: 'TZS 14,800,000', occupancy: '94.1%', paymentBalance: 'TZS 3,200,000', propertiesCount: 34 };
+const fallbackDeals: OwnerDeal[] = [
+  { id: 1, title: 'Kassim & Friends (4 Scholars)', status: 'Urgent SLA 15m', note: 'Active lead with strong conversion signal.' },
+  { id: 2, title: 'Adv. Brenda K. (LexAfrica TZ)', status: 'Walkthrough Today', note: 'Active lead with strong conversion signal.' },
+  { id: 3, title: 'Dr. Josephat M. (UK Diaspora)', status: 'Drone Verification', note: 'Active lead with strong conversion signal.' },
+];
+
+function mapAvailableListing(row: OwnerListingRow): Property | null {
+  const status = String(row.status ?? 'Approved').toLowerCase();
+  const lat = Number(row.lat ?? row.latitude);
+  const lng = Number(row.lng ?? row.longitude);
+  if (!['approved', 'available'].includes(status) || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const title = String(row.title ?? 'Available property');
+  const city = String(row.city ?? 'Dar es Salaam');
+  const image = String(row.image ?? row.thumbnail_url ?? '');
+  const propertyType = String(row.property_type ?? row.type ?? title).toLowerCase();
+  const images = Array.isArray(row.images) ? row.images.map(String) : image ? [image] : [];
+
+  return {
+    id: String(row.id ?? title),
+    created_at: String(row.created_at ?? new Date().toISOString()),
+    title,
+    property_type: /invest|land|commercial|parcel|office/.test(propertyType) ? 'Invest' : 'Live',
+    status: 'Approved',
+    price: parseMarketplacePrice(String(row.price ?? '')),
+    video_url: '',
+    thumbnail_url: image,
+    images,
+    location: { lat, lng, address: city, city, state: 'Tanzania', zip: '14111' },
+    agent: { id: 'flx-owner-map', name: 'FLX Realty', avatar: '', phone: '', email: '', license: 'FLX', role: 'Agent' },
+    metadata: { beds: Number(String(row.beds ?? 0)) || 0, baths: Number(String(row.baths ?? 0)) || 0, sqft: Number(String(row.sqft ?? 0)) || 0 },
+    description: String(row.description ?? ''),
+  };
+}
 
 export function OwnerDashboardReferencePage() {
   const [dashboard, setDashboard] = useState<Dashboard>(summaryFallback);
   const [owner, setOwner] = useState<OwnerData>({ portfolio: { totalRevenue: summaryFallback.totalRevenue, occupancy: summaryFallback.occupancy, paymentBalance: summaryFallback.paymentBalance, units: fallbackUnits }, maintenance: [] });
-  const [agent, setAgent] = useState<AgentData>({ deals: [] });
+  const [agent, setAgent] = useState<AgentData>({ deals: fallbackDeals });
   const [activeTab, setActiveTab] = useState('All Units');
   const [activeWorkspace, setActiveWorkspace] = useState('Dashboard / Overview');
   const [query, setQuery] = useState('');
@@ -121,16 +162,62 @@ export function OwnerDashboardReferencePage() {
           <div className="owner-reference-right"><section className="owner-reference-panel owner-reference-maintenance"><PanelTitle icon={AlertTriangle} title="Urgent SLA Maintenance" badge="Level 1 Critical" /><div className="owner-reference-alert"><div><b>Water Booster Pump Pressure Fault</b><span>⏱ 2h 14m SLA</span></div><p>Mlimani Hostel • 3rd Floor Header Tank (Feeds Room 301 & 304). Pressure dropped below 1.2 Bar at 08:14 EAT.</p><button className="is-primary" type="button" disabled={maintenanceBusy} onClick={dispatchFundi}>{maintenanceBusy ? 'Dispatching...' : '☎ Dispatch Fundi Hamisi'}</button><button type="button" onClick={() => setNotice({ tone: 'success', message: 'IoT reset command queued.' })}>IoT Reset</button></div><span className="owner-reference-subhead">SMART BUILDING TELEMETRY</span><Telemetry label="DAWASA Mains Supply" value="36,000L Reserve (90%)" icon="💧" /><Telemetry label="LUKU Master Mwenge" value="TZS 184,500 (~24 Days)" icon="⚡" /><Telemetry label="Standby Generator" value="98% Diesel Tank Ready" icon="⛽" /></section><section className="owner-reference-panel"><PanelTitle icon={Activity} title="Intake Surge Engine" badge="+14% Index" /><h3>UDSM & Ardhi Corridor Spike</h3><p className="owner-reference-body-copy">Admissions window starts in 3 days. Demand for single beds within 800m of Survey bus stop has spiked 3.4x this week.</p><div className="owner-reference-surge"><span>Vacant Bed 301 (Mlimani): <s>TZS 280,000</s></span><strong>Recommended Listing Price: <b>TZS 290,000</b></strong><button type="button" onClick={() => setNotice({ tone: 'success', message: 'TZS 10k surge applied to Bed 301.' })}>Apply +TZS 10k Surge</button><button type="button">Dismiss</button></div></section><section className="owner-reference-panel"><PanelTitle icon={Zap} title="Instant Escrow Disbursement" /><div className="owner-reference-payout"><span>Available Liquid Balance: <b>TZS 11,600,000</b></span><span>TRA 10% Withholding Tax (WHT): <b>- TZS 1,160,000</b></span><strong>Net Disbursed to Account: <b>TZS 10,440,000</b></strong></div><label className="owner-reference-radio"><input type="radio" defaultChecked name="payout" /> <span><b>Vodacom M-Pesa Boma Lipa</b><small>Till #984210 (Haji Properties)</small></span><em>Instant (0s)</em></label><label className="owner-reference-radio"><input type="radio" name="payout" /> <span><b>CRDB Bank Corporate RTGS</b><small>Acct #015029***4400</small></span><em>&lt; 15 mins</em></label><label className="owner-reference-radio"><input type="radio" name="payout" /> <span><b>Airtel Money Agent Wallet</b><small>+255 784 *** 902</small></span><em>Instant (0s)</em></label><button className="owner-reference-payout-button" type="button" onClick={executePayout}><Smartphone size={17} /> Execute Instant Payout (TZS 10,440,000)</button><small className="owner-reference-protection">Protected by Bank of Tanzania (BOT) FinTech Directive 2024 & 256-bit Ardhi Ledger</small></section></div>
         </div>
       </main>
-      {activeWorkspace !== 'Dashboard / Overview' && <OwnerWorkspacePage workspace={activeWorkspace} dashboard={dashboard} units={units} deals={agent.deals ?? []} maintenance={owner.maintenance ?? []} onClose={() => setActiveWorkspace('Dashboard / Overview')} onAddUnit={() => setUnitModal(true)} onPayout={executePayout} onDispatch={dispatchFundi} onExport={downloadCsv} onNotice={(message) => setNotice({ tone: 'success', message })} />}
+      {activeWorkspace !== 'Dashboard / Overview' && <OwnerWorkspacePage workspace={activeWorkspace} dashboard={dashboard} units={units} deals={agent.deals ?? []} maintenance={owner.maintenance ?? []} onClose={() => setActiveWorkspace('Dashboard / Overview')} onNavigate={setActiveWorkspace} onAddUnit={() => setUnitModal(true)} onPayout={executePayout} onDispatch={dispatchFundi} onExport={downloadCsv} onNotice={(message) => setNotice({ tone: 'success', message })} />}
     </div>
     {notice && <div className={`owner-reference-notice ${notice.tone}`}>{notice.message}<button type="button" onClick={() => setNotice(null)}><X size={15} /></button></div>}
     {unitModal && <div className="owner-reference-modal-backdrop" onClick={() => setUnitModal(false)}><form className="owner-reference-modal" onClick={(event) => event.stopPropagation()} onSubmit={addUnit}><button className="owner-reference-modal-close" type="button" onClick={() => setUnitModal(false)}><X size={17} /></button><Plus size={23} /><h2>Add unit to portfolio</h2><input required value={unitName} onChange={(event) => setUnitName(event.target.value)} placeholder="Unit name" /><input required value={unitLabel} onChange={(event) => setUnitLabel(event.target.value)} placeholder="Property name" /><input required value={unitValue} onChange={(event) => setUnitValue(event.target.value)} placeholder="Rate" /><button className="is-primary" type="submit">Add unit <ArrowRight size={15} /></button></form></div>}
   </div>;
 }
 
-function OwnerWorkspacePage({ workspace, dashboard, units, deals, maintenance, onClose, onAddUnit, onPayout, onDispatch, onExport, onNotice }: { workspace: string; dashboard: Dashboard; units: Unit[]; deals: Array<{ id: number; title: string; status: string; amount?: string; note?: string }>; maintenance: Array<{ title: string; location: string; state: string }>; onClose: () => void; onAddUnit: () => void; onPayout: () => void; onDispatch: () => void; onExport: () => void; onNotice: (message: string) => void }) {
+function OwnerWorkspacePage({ workspace, dashboard, units, deals, maintenance, onClose, onNavigate, onAddUnit, onPayout, onDispatch, onExport, onNotice }: { workspace: string; dashboard: Dashboard; units: Unit[]; deals: Array<{ id: number; title: string; status: string; amount?: string; note?: string }>; maintenance: Array<{ title: string; location: string; state: string }>; onClose: () => void; onNavigate: (workspace: string) => void; onAddUnit: () => void; onPayout: () => void; onDispatch: () => void; onExport: () => void; onNotice: (message: string) => void }) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [autoPayoutEnabled, setAutoPayoutEnabled] = useState(false);
+  const [headerSearch, setHeaderSearch] = useState('');
+  const [mapOpen, setMapOpen] = useState(false);
+  const [mapProperties, setMapProperties] = useState<Property[]>(getFallbackMarketplaceMapProperties);
+  const [mapError, setMapError] = useState('');
+  const [selectedMapProperty, setSelectedMapProperty] = useState<Property | null>(null);
+    useEffect(() => {
+      const bodyOverflow = document.body.style.overflow;
+      const documentOverflow = document.documentElement.style.overflow;
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = bodyOverflow;
+        document.documentElement.style.overflow = documentOverflow;
+      };
+    }, []);
+  useEffect(() => {
+    let isCurrent = true;
+    fetch('/api/properties')
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Property inventory request failed');
+        return response.json() as Promise<{ properties?: OwnerListingRow[] }>;
+      })
+      .then((payload) => {
+        if (!isCurrent) return;
+        const availableProperties = (payload.properties ?? []).map(mapAvailableListing).filter((property): property is Property => property !== null);
+        setMapProperties(availableProperties);
+        setMapError(availableProperties.length ? '' : 'No approved properties are available right now.');
+      })
+      .catch(() => {
+        if (!isCurrent) return;
+        setMapProperties(getFallbackMarketplaceMapProperties());
+        setMapError('Live inventory is unavailable. Showing cached properties.');
+      });
+    return () => { isCurrent = false; };
+  }, []);
+  const searchResults = useMemo<OwnerSearchResult[]>(() => {
+    const normalizedQuery = headerSearch.trim().toLowerCase();
+    if (!normalizedQuery) return [];
+    const dealResults = deals
+      .filter((deal) => `${deal.title} ${deal.status} ${deal.note ?? ''}`.toLowerCase().includes(normalizedQuery))
+      .map((deal) => ({ id: `deal-${deal.id}`, kind: 'Deal' as const, title: deal.title, detail: deal.status, workspace: 'Deal Pipeline' }));
+    const unitResults = units
+      .filter((unit) => `${unit.name} ${unit.label} ${unit.status} ${unit.value}`.toLowerCase().includes(normalizedQuery))
+      .map((unit) => ({ id: `unit-${unit.name}`, kind: 'Unit' as const, title: unit.name, detail: `${unit.label} · ${unit.status}`, workspace: 'Property Portfolio & Units' }));
+    return [...dealResults, ...unitResults].slice(0, 7);
+  }, [deals, headerSearch, units]);
   const titles: Record<string, string> = {
     'Deal Pipeline': 'Deal pipeline',
     'Property Portfolio & Units': 'Property portfolio & units',
@@ -140,15 +227,88 @@ function OwnerWorkspacePage({ workspace, dashboard, units, deals, maintenance, o
     'System Settings': 'System settings',
   };
 
-  return <section className="owner-reference-workspace" style={{ position: 'fixed', inset: 0, zIndex: 30, overflowY: 'auto', background: '#f6f5f2', padding: '32px max(24px, calc((100vw - 1120px) / 2))' }}>
-    <header className="owner-reference-panel-title"><div><Building2 size={18} /><h1>{titles[workspace] ?? workspace}</h1></div><button type="button" onClick={onClose}><ArrowRight size={14} /> Back to overview</button></header>
-    {workspace === 'Deal Pipeline' && <section className="owner-reference-panel"><PanelTitle icon={Activity} title="Active deals" badge={`${deals.length} in pipeline`} />{deals.length ? deals.map((deal) => <article className="owner-reference-deal" key={deal.id}><div className="owner-reference-deal-icon"><FileCheck2 size={20} /></div><div className="owner-reference-deal-body"><b>{deal.title}</b><span>{deal.status}</span><p>{deal.note || 'Owner review required.'}</p></div><button type="button" onClick={() => onNotice(`Review opened for ${deal.title}.`)}>Review deal</button></article>) : <p>No active deals are waiting for review.</p>}</section>}
+  return <section className={`owner-reference-workspace ${workspace === 'Deal Pipeline' ? 'is-deal-pipeline' : ''}`} style={{ background: '#f6f5f2' }}>
+    <header className="owner-workspace-topbar">
+      <div className="owner-workspace-searchbox">
+        <label className="owner-workspace-search-field"><Search size={16} /><input aria-label="Search deals and portfolio units" value={headerSearch} onChange={(event) => setHeaderSearch(event.target.value)} placeholder="Search deals, units, tenants..." />{headerSearch && <button type="button" aria-label="Clear search" onClick={() => setHeaderSearch('')}><X size={15} /></button>}</label>
+        {headerSearch.trim() && <div className="owner-workspace-search-results" role="listbox" aria-label="Search results">
+          {searchResults.length ? searchResults.map((result) => <button type="button" role="option" aria-selected="false" key={result.id} onClick={() => { setHeaderSearch(''); onNavigate(result.workspace); }}><span><b>{result.title}</b><small>{result.detail}</small></span><em>{result.kind}</em></button>) : <p>No matching deals or units.</p>}
+        </div>}
+      </div>
+      <div className="owner-workspace-utilities"><button className="owner-workspace-place" type="button" aria-label="Open map of available properties" aria-expanded={mapOpen} onClick={() => { setSelectedMapProperty(null); setMapOpen((open) => !open); }}><MapPin size={15} /><span>Dar es Salaam, TZ</span></button><button className="owner-workspace-notifications" type="button" aria-label="Notifications" onClick={() => onNotice('You are all caught up.')}><Bell size={18} /></button><MarketplaceAccountAccess role="Owner" variant="owner" /></div>
+    </header>
+    <div className={`owner-workspace-content ${workspace === 'Deal Pipeline' ? 'is-deal-pipeline' : ''}`} style={{ padding: workspace === 'Deal Pipeline' ? '20px clamp(14px, 3vw, 38px)' : '32px max(24px, calc((100vw - 1120px) / 2))' }}>
+    <header className="owner-reference-panel-title"><div><Building2 size={18} /><h1>{titles[workspace] ?? workspace}</h1></div></header>
+    {workspace === 'Deal Pipeline' && <OwnerDealPipeline deals={deals} />}
     {workspace === 'Property Portfolio & Units' && <section className="owner-reference-panel"><PanelTitle icon={Building2} title="Portfolio units" subtitle={`${units.length} registered units`} /><div className="owner-reference-table-tools"><span><button type="button" onClick={onAddUnit}><Plus size={13} /> Add unit</button><button type="button" onClick={onExport}><Download size={13} /> Export CSV</button></span></div><div className="owner-reference-table-wrap"><table><thead><tr><th>Unit</th><th>Property</th><th>Rate</th><th>Status</th></tr></thead><tbody>{units.map((unit) => <tr key={unit.name}><td><b>{unit.name}</b></td><td>{unit.label}</td><td>{unit.value}</td><td>{unit.status}</td></tr>)}</tbody></table></div></section>}
     {workspace === 'Financials & Escrow Ledger' && <section className="owner-reference-panel"><PanelTitle icon={WalletCards} title="Owner ledger" badge="BOT escrow synced" /><div className="owner-reference-kpis"><Metric label="Semester revenue" value={dashboard.totalRevenue} note="Current reporting cycle" icon={CircleDollarSign} tone="red" progress="82%" /><Metric label="Escrow balance" value={dashboard.paymentBalance} note="Pending settlement" icon={LockKeyhole} tone="orange" progress="45%" /><Metric label="Occupancy" value={dashboard.occupancy} note="Across registered units" icon={Building2} tone="ink" progress="94%" /></div><button className="is-primary" type="button" onClick={onPayout}><Bolt size={15} /> Request withdrawal</button></section>}
     {workspace === 'Maintenance & Fundis' && <section className="owner-reference-panel"><PanelTitle icon={Wrench} title="Maintenance requests" badge={`${maintenance.length} logged`} /><div className="owner-reference-alert"><b>Water Booster Pump Pressure Fault</b><p>Mlimani Hostel • Fundi dispatch available</p><button className="is-primary" type="button" onClick={onDispatch}>Dispatch Fundi Hamisi</button></div>{maintenance.map((item, index) => <article className="owner-reference-deal" key={`${item.title}-${index}`}><div className="owner-reference-deal-body"><b>{item.title}</b><p>{item.location}</p><span>{item.state}</span></div></article>)}</section>}
     {workspace === 'Contracts (Mkataba Pro)' && <section className="owner-reference-panel"><PanelTitle icon={FileCheck2} title="Contracts & handovers" badge={`${deals.length} active records`} />{deals.map((deal) => <article className="owner-reference-deal" key={deal.id}><div className="owner-reference-deal-body"><b>{deal.title}</b><span>{deal.status}</span><p>{deal.note || 'Lease documents are ready for review.'}</p></div><a href="/legal/escrow">Open escrow room <ArrowRight size={13} /></a></article>)}{deals.length === 0 && <a href="/legal/escrow">Open escrow deal room <ArrowRight size={13} /></a>}</section>}
     {workspace === 'System Settings' && <section className="owner-reference-panel"><PanelTitle icon={Settings} title="Workspace preferences" subtitle="Settings apply to this browser profile." /><label className="owner-reference-setting"><span><b>Operational notifications</b><small>Maintenance, payment, and handover alerts</small></span><input type="checkbox" checked={notificationsEnabled} onChange={() => setNotificationsEnabled((enabled) => !enabled)} /></label><label className="owner-reference-setting"><span><b>Automatic payout reminders</b><small>Notify when escrow funds become available</small></span><input type="checkbox" checked={autoPayoutEnabled} onChange={() => setAutoPayoutEnabled((enabled) => !enabled)} /></label></section>}
+    </div>
+    {mapOpen && <div className="owner-property-map-overlay" onClick={() => setMapOpen(false)}><section className="owner-property-map-dialog" role="dialog" aria-modal="true" aria-labelledby="owner-property-map-title" onClick={(event) => event.stopPropagation()}>
+      <header><div><span>FLX PROPERTY INVENTORY</span><h2 id="owner-property-map-title">Available properties</h2><small>{mapProperties.length} mapped listings</small></div><button type="button" aria-label="Close property map" onClick={() => setMapOpen(false)}><X size={18} /></button></header>
+      {mapError && <p className="owner-property-map-notice">{mapError}</p>}
+      <div className="owner-property-map-canvas">{mapProperties.length ? <RealEstateLeafletMap properties={mapProperties} selectedProperty={selectedMapProperty} onSelectProperty={setSelectedMapProperty} onOpenDetails={setSelectedMapProperty} userLocation={null} /> : <p>No approved properties are available to display.</p>}</div>
+      <footer>{selectedMapProperty ? <div><strong>{selectedMapProperty.title}</strong><span>{selectedMapProperty.location.city} · TZS {selectedMapProperty.price.toLocaleString()}</span></div> : <span>Select a marker to inspect a property.</span>}<span className="owner-property-map-legend"><i /> Available</span></footer>
+    </section></div>}
   </section>;
+}
+
+const dealPipelineStages = ['New inquiry', 'Viewing', 'Due diligence', 'Offer & escrow', 'Closing'] as const;
+type DealPipelineStage = (typeof dealPipelineStages)[number];
+
+function getDealPipelineStage(status: string): DealPipelineStage {
+  const normalizedStatus = status.toLowerCase();
+  if (/(closed|handover|move-in|disburse|release)/.test(normalizedStatus)) return 'Closing';
+  if (/(offer|escrow|contract|lease|document)/.test(normalizedStatus)) return 'Offer & escrow';
+  if (/(verification|survey|title|diligence|drone)/.test(normalizedStatus)) return 'Due diligence';
+  if (/(walkthrough|viewing|inspection|tour|scheduled)/.test(normalizedStatus)) return 'Viewing';
+  return 'New inquiry';
+}
+
+function OwnerDealPipeline({ deals }: { deals: OwnerDeal[] }) {
+  const [search, setSearch] = useState('');
+  const [selectedDeal, setSelectedDeal] = useState<OwnerDeal | null>(null);
+  const filteredDeals = useMemo(() => deals.filter((deal) => `${deal.title} ${deal.status} ${deal.note || ''}`.toLowerCase().includes(search.toLowerCase())), [deals, search]);
+  const needsAttention = deals.filter((deal) => /(urgent|sla|overdue|action required)/i.test(deal.status)).length;
+  const verificationCount = deals.filter((deal) => getDealPipelineStage(deal.status) === 'Due diligence').length;
+  const escrowCount = deals.filter((deal) => getDealPipelineStage(deal.status) === 'Offer & escrow').length;
+
+  return <div className="owner-deal-pipeline">
+    <div className="owner-pipeline-summary" aria-label="Deal pipeline summary">
+      <div><span>Active deals</span><strong>{deals.length}</strong></div>
+      <div><span>Needs attention</span><strong>{needsAttention}</strong></div>
+      <div><span>In verification</span><strong>{verificationCount}</strong></div>
+      <div><span>Offer & escrow</span><strong>{escrowCount}</strong></div>
+    </div>
+    <div className="owner-pipeline-toolbar">
+      <label><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search deals, clients, or status" /></label>
+      <span>{filteredDeals.length} of {deals.length} deals</span>
+    </div>
+    <div className="owner-pipeline-board">
+      {dealPipelineStages.map((stage) => {
+        const stageDeals = filteredDeals.filter((deal) => getDealPipelineStage(deal.status) === stage);
+        return <section className="owner-pipeline-lane" data-stage={stage.toLowerCase().replaceAll(' ', '-').replace('&', 'and')} key={stage}>
+          <header><h2>{stage}</h2><span>{stageDeals.length}</span></header>
+          <div className="owner-pipeline-cards">
+            {stageDeals.length ? stageDeals.map((deal) => <article className={`owner-pipeline-card ${selectedDeal?.id === deal.id ? 'is-selected' : ''}`} key={deal.id}>
+              <div className="owner-pipeline-card-status"><span className={/(urgent|sla|overdue)/i.test(deal.status) ? 'is-urgent' : ''}>{deal.status}</span><small>#{deal.id}</small></div>
+              <h3>{deal.title}</h3>
+              <p>{deal.note || 'No additional notes.'}</p>
+              <footer><span><CircleDollarSign size={14} /> {deal.amount || 'Value pending'}</span><button type="button" onClick={() => setSelectedDeal(deal)}>Review <ArrowRight size={14} /></button></footer>
+            </article>) : <p className="owner-pipeline-empty">{search ? 'No matching deals.' : 'No deals at this stage.'}</p>}
+          </div>
+        </section>;
+      })}
+    </div>
+    {selectedDeal && <section className="owner-pipeline-detail" aria-label="Selected deal details">
+      <div className="owner-pipeline-detail-heading"><div><span>DEAL REVIEW</span><h2>{selectedDeal.title}</h2></div><button type="button" aria-label="Close deal details" onClick={() => setSelectedDeal(null)}><X size={17} /></button></div>
+      <dl><div><dt>Pipeline stage</dt><dd>{getDealPipelineStage(selectedDeal.status)}</dd></div><div><dt>Current status</dt><dd>{selectedDeal.status}</dd></div><div><dt>Deal value</dt><dd>{selectedDeal.amount || 'Not provided'}</dd></div></dl>
+      <p>{selectedDeal.note || 'No additional notes have been added to this deal.'}</p>
+      <a href="/legal/escrow">Open escrow workspace <ArrowRight size={14} /></a>
+    </section>}
+  </div>;
 }
 
 function MapPinIcon() { return <span className="owner-reference-pin">●</span>; }
