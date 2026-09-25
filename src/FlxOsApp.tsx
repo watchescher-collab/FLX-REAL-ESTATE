@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent, ReactElement } from "react";
 import { RealEstateLeafletMap } from "./components/RealEstateLeafletMap";
 import { HostelDetailPage } from "./components/HostelDetailPage";
 import { MarketplaceReferencePage } from "./components/MarketplaceReferencePage";
 import { OwnerDashboardReferencePage } from "./components/OwnerDashboardReferencePage";
 import { LegalEscrowConsolePage } from "./components/LegalEscrowConsolePage";
+import { CadastralDiligencePage } from "./components/CadastralDiligencePage";
+import { signOut as signOutApi } from "./auth";
 import type { Property } from "./types";
 import {
   Activity,
@@ -145,10 +148,10 @@ const fallbackListings: Listing[] = [
 const roleNavItems: Record<Role, Array<{ id: string; role: Role; label: string; icon: typeof Home }>> = {
   Explore: [
     { id: "market", role: "Explore", label: "Market", icon: Search },
-    { id: "hostels", role: "Client", label: "Hostels", icon: UserRound },
-    { id: "offices", role: "Agent", label: "Offices", icon: ClipboardCheck },
-    { id: "land", role: "Owner", label: "Land", icon: Building2 },
-    { id: "ops", role: "Ops", label: "Ops", icon: ShieldCheck },
+    { id: "home", role: "Client", label: "Hostels", icon: UserRound },
+    { id: "overview", role: "Agent", label: "Offices", icon: ClipboardCheck },
+    { id: "overview", role: "Owner", label: "Land", icon: Building2 },
+    { id: "live", role: "Ops", label: "Ops", icon: ShieldCheck },
   ],
   Client: [
     { id: "home", role: "Client", label: "Home", icon: Home },
@@ -446,7 +449,7 @@ function ClientScreen({
   const reminders = dashboard.reminders ?? [];
   const tickets = dashboard.tickets ?? [];
 
-  const clientViews: Record<string, JSX.Element> = {
+  const clientViews: Record<string, ReactElement> = {
     home: (
       <>
         <section className="os-profile-card">
@@ -588,7 +591,7 @@ function AgentScreen({ activeView, dashboard, onAddLead, onReviewLead, onReviewD
   const deals = dashboard.deals ?? [];
   const contracts = dashboard.contracts ?? [];
 
-  const agentViews: Record<string, JSX.Element> = {
+  const agentViews: Record<string, ReactElement> = {
     overview: (
       <>
         <section className="os-profile-card os-agent-card">
@@ -689,8 +692,13 @@ function OwnerScreen({
     { name: "Suite 4B", label: "Posta Office Suites", value: "TZS 2,000,000 / month", status: "Leased" },
     { name: "Apt 3", label: "Kijitonyama Apartments", value: "TZS 1,100,000 / month", status: "Occupied" },
   ];
+  const maintenanceItems = dashboard.maintenance?.length ? dashboard.maintenance : [
+    { title: "Water pressure fix", location: "Mlimani Comfort Hostel", state: "Waiting for plumber" },
+    { title: "Gate sensor replacement", location: "Kijitonyama Apartments", state: "Technician on site" },
+    { title: "Roof leak inspection", location: "Posta Office Suites", state: "Approved by owner" },
+  ];
 
-  const ownerViews: Record<string, JSX.Element> = {
+  const ownerViews: Record<string, ReactElement> = {
     overview: (
       <>
         <section className="os-owner-banner">
@@ -760,11 +768,31 @@ function OwnerScreen({
         </div>
       </>
     ),
-    listings: (
+    pipeline: (
+      <section className="os-owner-table">
+        <div className="os-owner-section-title">
+          <div>
+            <h2><Activity size={16} /> Leasing pipeline</h2>
+            <span>{units.length} units in portfolio</span>
+          </div>
+        </div>
+        <div className="os-owner-kpi-grid">
+          <div><span>Occupied / leased</span><strong>{units.filter((unit) => /occupied|leased/i.test(unit.status)).length}</strong><small>Active agreements</small></div>
+          <div><span>Available</span><strong>{units.filter((unit) => /vacant|ready|new/i.test(unit.status)).length}</strong><small>Ready for placement</small></div>
+          <div><span>Portfolio occupancy</span><strong>{ownerData.occupancy}</strong><small>Across all locations</small></div>
+        </div>
+        <div className="os-owner-ledger-row">
+          <span>Next step<small>Review available units and update their status</small></span>
+          <button className="os-primary-button" onClick={() => onChangeView("units")}>Manage units <ArrowRight size={13} /></button>
+          <button className="os-secondary-button" onClick={() => onChangeView("finance")}>View cash flow</button>
+        </div>
+      </section>
+    ),
+    units: (
       <section className="os-owner-approvals">
         <div className="os-owner-section-title">
           <div>
-            <h2><Building2 size={16} /> Listings</h2>
+            <h2><Building2 size={16} /> Units & listings</h2>
             <span>{units.length} units</span>
           </div>
         </div>
@@ -816,18 +844,14 @@ function OwnerScreen({
           <input value={newMaintenanceState} onChange={(event) => setNewMaintenanceState(event.target.value)} placeholder="Status" />
           <button className="os-primary-button" onClick={() => { if (!newMaintenanceTitle.trim() || !newMaintenanceLocation.trim()) return; onAddMaintenance(newMaintenanceTitle.trim(), newMaintenanceLocation.trim(), newMaintenanceState.trim() || 'Pending'); setNewMaintenanceTitle(''); setNewMaintenanceLocation(''); setNewMaintenanceState('Pending'); }}>Add maintenance task</button>
         </div>
-        {[(dashboard.maintenance ?? []).length ? dashboard.maintenance : [
-          ["Water pressure fix", "Mlimani Comfort Hostel", "Waiting for plumber"],
-          ["Gate sensor replacement", "Kijitonyama Apartments", "Technician on site"],
-          ["Roof leak inspection", "Posta Office Suites", "Approved by owner"],
-        ]].flat().map(([title, location, state]) => (
-          <article className="os-owner-approval" key={`${title}-${location}`}>
+        {maintenanceItems.map((item) => (
+          <article className="os-owner-approval" key={`${item.title}-${item.location}`}>
             <div className="os-owner-approval-icon"><Wrench size={14} /></div>
             <div>
-              <strong>{title}</strong>
-              <small>{location}</small>
+              <strong>{item.title}</strong>
+              <small>{item.location}</small>
             </div>
-            <button>{state}</button>
+            <button>{item.state}</button>
           </article>
         ))}
       </section>
@@ -836,7 +860,8 @@ function OwnerScreen({
 
   const sidebarItems = [
     { id: "overview", label: "Overview", icon: LayoutDashboard },
-    { id: "listings", label: "Listings", icon: Building2 },
+    { id: "pipeline", label: "Pipeline", icon: Activity },
+    { id: "units", label: "Units", icon: Building2 },
     { id: "finance", label: "Finance", icon: Wallet },
     { id: "repairs", label: "Repairs", icon: Wrench },
   ];
@@ -875,7 +900,7 @@ function OwnerScreen({
   );
 }
 
-function OpsScreen({ activeView, dashboard, onAddIncident, onResolveIncident, onReleaseFunds, onAddQueueItem }: { activeView: string; dashboard: OpsDashboard; onAddIncident: (title: string, summary: string, action: string) => void; onResolveIncident: (incidentTitle: string) => void; onReleaseFunds: () => void; onAddQueueItem: (label: string, status: string, details: string) => void; }) {
+function OpsScreen({ activeView, dashboard, onAddIncident, onResolveIncident, onReleaseFunds, onAddQueueItem, onReviewQueueItem }: { activeView: string; dashboard: OpsDashboard; onAddIncident: (title: string, summary: string, action: string) => void; onResolveIncident: (incidentTitle: string) => void; onReleaseFunds: () => void; onAddQueueItem: (label: string, status: string, details: string) => void; onReviewQueueItem: (itemLabel: string) => void; }) {
   const [incidentTitle, setIncidentTitle] = useState("");
   const [incidentSummary, setIncidentSummary] = useState("");
   const [queueLabel, setQueueLabel] = useState("");
@@ -885,7 +910,7 @@ function OpsScreen({ activeView, dashboard, onAddIncident, onResolveIncident, on
   const disputes = dashboard.disputes ?? [];
   const paymentSummary = dashboard.paymentSummary ?? { balance: 'TZS 142,500,000', flags: '0 Security Flags • 100% Reconciled' };
 
-  const opsViews: Record<string, JSX.Element> = {
+  const opsViews: Record<string, ReactElement> = {
     live: (
       <>
         <section className="os-ops-hero">
@@ -914,7 +939,7 @@ function OpsScreen({ activeView, dashboard, onAddIncident, onResolveIncident, on
           <button className="os-primary-button" onClick={() => { if (!queueLabel.trim() || !queueDetails.trim()) return; onAddQueueItem(queueLabel.trim(), queueStatus.trim() || 'Pending', queueDetails.trim()); setQueueLabel(''); setQueueStatus('Pending'); setQueueDetails(''); }}>Add queue item</button>
         </div>
         {queue.map((item, index) => (
-          <article className="os-verification-row" key={`${item.label}-${index}`}><div className="os-verification-icon">{index === 0 ? <MapPin size={16} /> : index === 1 ? <Home size={16} /> : <UserRound size={16} />}</div><div><span>{item.status}</span><strong>{item.label}</strong><small>{item.details}</small></div><button onClick={() => onResolveIncident(item.label)}>{index === 0 ? "Approve NLIS Seal" : "Approve"}</button></article>
+          <article className="os-verification-row" key={`${item.label}-${index}`}><div className="os-verification-icon">{index === 0 ? <MapPin size={16} /> : index === 1 ? <Home size={16} /> : <UserRound size={16} />}</div><div><span>{item.status}</span><strong>{item.label}</strong><small>{item.details}</small></div><button onClick={() => onReviewQueueItem(item.label)}>{/verified/i.test(item.status) ? "Reviewed" : index === 0 ? "Approve NLIS Seal" : "Approve"}</button></article>
         ))}
       </section>
     ),
@@ -1008,7 +1033,7 @@ function ProfileModal({
     localStorage.setItem(`flx-profile-${role}`, JSON.stringify(draft));
     onClose();
   };
-  const updatePhoto = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const updatePhoto = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -1047,12 +1072,12 @@ function ProfileModal({
 
         <div className="os-profile-section-label">Workspace access</div>
         <div className="os-profile-role-grid">
-          {[
+          {([
             { role: "Client", label: "Client OS", icon: Home },
             { role: "Agent", label: "Agent CRM", icon: Activity },
             { role: "Owner", label: "Owner OS", icon: LayoutDashboard },
             { role: "Ops", label: "Ops Center", icon: ShieldCheck },
-          ].map(({ role: workspaceRole, label, icon: Icon }) => (
+          ] as const).map(({ role: workspaceRole, label, icon: Icon }) => (
             <button key={`${workspaceRole}-${label}`} className={role === workspaceRole ? "active" : ""} onClick={() => { onRole(workspaceRole); onClose(); }}>
               <Icon size={16} />
               <span>{label}</span>
@@ -1085,6 +1110,10 @@ export default function FlxOsApp() {
 
   if (window.location.pathname === '/legal' || window.location.pathname === '/legal/escrow') {
     return <LegalEscrowConsolePage />;
+  }
+
+  if (window.location.pathname === '/cadastral' || window.location.pathname === '/land/gezaulole') {
+    return <CadastralDiligencePage />;
   }
 
   if (window.location.pathname === '/' || window.location.pathname === '/marketplace') {
@@ -1337,6 +1366,23 @@ export default function FlxOsApp() {
     });
   };
 
+  const handleReviewQueueItem = (itemLabel: string) => {
+    setOpsDashboard((current) => {
+      const nextDashboard: OpsDashboard = {
+        ...current,
+        queue: (current.queue ?? []).map((item) =>
+          item.label === itemLabel ? { ...item, status: 'Verified', details: `${item.details} • Reviewed and approved.` } : item,
+        ),
+      };
+      fetch('/api/ops/dashboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nextDashboard),
+      }).catch(() => undefined);
+      return nextDashboard;
+    });
+  };
+
   const handleResolveIncident = (incidentTitle: string) => {
     setOpsDashboard((current) => {
       const nextDashboard: OpsDashboard = {
@@ -1375,9 +1421,17 @@ export default function FlxOsApp() {
   };
 
   const goToRole = (nextRole: Role) => {
-    setRole(nextRole);
     setIsProfileOpen(false);
     setSelectedListing(null);
+    if (nextRole === role) return;
+    const destinations: Record<Role, string> = {
+      Explore: "/#marketplace",
+      Client: "/#marketplace",
+      Agent: "/workspace#agent",
+      Owner: "/owner",
+      Ops: "/workspace#ops",
+    };
+    window.location.assign(destinations[nextRole]);
   };
 
   const currentScreen = useMemo(
@@ -1400,7 +1454,7 @@ export default function FlxOsApp() {
             onAddMaintenance={handleAddMaintenance}
           />
         ),
-        Ops: <OpsScreen activeView={activeView.Ops} dashboard={opsDashboard} onAddIncident={handleAddIncident} onResolveIncident={handleResolveIncident} onReleaseFunds={handleReleaseFunds} onAddQueueItem={handleAddQueueItem} />,
+        Ops: <OpsScreen activeView={activeView.Ops} dashboard={opsDashboard} onAddIncident={handleAddIncident} onResolveIncident={handleResolveIncident} onReleaseFunds={handleReleaseFunds} onAddQueueItem={handleAddQueueItem} onReviewQueueItem={handleReviewQueueItem} />,
       })[role],
     [activeView, clientDashboard, agentDashboard, ownerDashboard, opsDashboard, listings, role],
   );
@@ -1417,6 +1471,10 @@ export default function FlxOsApp() {
             onClick={() => {
               setActiveView((current) => ({ ...current, [role]: id }));
               if (navRole !== role) {
+                if (role === "Explore" && navRole === "Client") {
+                  window.location.assign("/#hostels");
+                  return;
+                }
                 goToRole(navRole);
               }
             }}
@@ -1438,8 +1496,10 @@ export default function FlxOsApp() {
           onRole={goToRole}
           onClose={() => setIsProfileOpen(false)}
           onSignOut={() => {
+            signOutApi();
             localStorage.removeItem("flx-user");
-            goToRole("Explore");
+            localStorage.removeItem("flx_local_session");
+            window.location.assign("/");
           }}
         />
       ) : null}

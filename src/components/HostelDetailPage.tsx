@@ -88,12 +88,12 @@ export function HostelDetailPage() {
           </button>
           <div className="hostel-search"><Search size={17} /><input aria-label="Search" placeholder="Search city, ward, or title deed..." /></div>
           <nav className="hostel-nav" aria-label="Primary navigation">
-            <a href="/#explore">Explore Properties</a>
-            <a className="is-active" href="#student-hostels">Student Hostels</a>
-            <a href="#commercial">Commercial Spaces</a>
-            <a href="#land">Land & Deeds</a>
-            <a href="#escrow">BOT Escrow</a>
-            <a href="#agent">Agent Portal</a>
+            <a href="/#marketplace">Explore Properties</a>
+            <a className="is-active" href="/#hostels">Student Hostels</a>
+            <a href="/#commercial">Commercial Spaces</a>
+            <a href="/cadastral">Land & Deeds</a>
+            <a href="/legal/escrow">BOT Escrow</a>
+            <a href="/agent#agent">Agent Portal</a>
           </nav>
           <div className="hostel-header__actions">
             <div className="hostel-toggle"><button type="button" className="is-selected">TZS</button><button type="button">USD</button></div>
@@ -103,7 +103,7 @@ export function HostelDetailPage() {
           </div>
           <button className="hostel-menu-button" aria-label="Open menu" type="button" onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X size={22} /> : <Menu size={22} />}</button>
         </div>
-        {menuOpen && <nav className="hostel-mobile-nav"><a href="/#explore">Explore Properties</a><a href="#student-hostels">Student Hostels</a><a href="#commercial">Commercial Spaces</a><a href="#land">Land & Deeds</a><a href="#escrow">BOT Escrow</a></nav>}
+        {menuOpen && <nav className="hostel-mobile-nav"><a href="/#marketplace">Explore Properties</a><a href="/#hostels">Student Hostels</a><a href="/#commercial">Commercial Spaces</a><a href="/cadastral">Land & Deeds</a><a href="/legal/escrow">BOT Escrow</a></nav>}
       </header>
 
       <main>

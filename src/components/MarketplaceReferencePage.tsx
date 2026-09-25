@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
 import {
   ArrowRight,
   Bell,
@@ -15,8 +16,14 @@ import {
   SlidersHorizontal,
   Sparkles,
   X,
+  BriefcaseBusiness,
+  LogOut,
+  UserRound,
 } from 'lucide-react';
 import { RealEstateLeafletMap } from './RealEstateLeafletMap';
+import { useAuth } from '../context/AuthContext';
+import { signOut as signOutApi } from '../auth';
+import './marketAccount.css';
 import type { Property, PropertyType } from '../types';
 
 type MarketListing = {
@@ -83,6 +90,60 @@ const toMapProperty = (listing: MarketListing): Property => ({
   description: listing.description,
 });
 
+export function MarketplaceAccountAccess({ role, variant = 'marketplace' }: { role: 'Client' | 'Owner'; variant?: 'marketplace' | 'owner' }) {
+  const { user, signOut } = useAuth();
+  const storageKey = `flx-profile-${role.toLowerCase()}`;
+  const [isOpen, setIsOpen] = useState(false);
+  const [profile, setProfile] = useState(() => {
+    const fallback = { name: user?.name || (role === 'Owner' ? 'Mzee Hamisi' : 'Aisha Mtega'), email: user?.email || (role === 'Owner' ? 'hamisi@flx.local' : 'aisha@flx.local'), phone: '+255 712 345 678' };
+    try {
+      const stored = localStorage.getItem(storageKey);
+      return stored ? { ...fallback, ...JSON.parse(stored) as Partial<typeof fallback> } : fallback;
+    } catch {
+      return fallback;
+    }
+  });
+  const [notice, setNotice] = useState('');
+
+  const updateProfile = (field: keyof typeof profile, value: string) => setProfile((current) => ({ ...current, [field]: value }));
+  const openWorkspace = (nextRole: 'Client' | 'Agent' | 'Owner' | 'Ops') => {
+    const destinations = { Client: '/#marketplace', Agent: '/workspace#agent', Owner: '/owner', Ops: '/workspace#ops' };
+    window.location.assign(destinations[nextRole]);
+  };
+  const handleSignOut = () => {
+    signOut();
+    signOutApi();
+    localStorage.removeItem('flx-user');
+    window.location.assign('/');
+  };
+
+  return <>
+    <button className={variant === 'owner' ? 'market-account-owner-trigger' : 'market-reference-avatar'} type="button" aria-label="Open profile and workspace menu" onClick={() => { setIsOpen(true); setNotice(''); }}>
+      {variant === 'owner' ? <><span className="market-account-owner-initials">{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span><b>{profile.name}<small>Property owner</small></b><ChevronDown size={14} /></> : profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}
+    </button>
+    {isOpen && <div className="market-account-backdrop" onClick={() => setIsOpen(false)}>
+      <section className="market-account-modal" role="dialog" aria-modal="true" aria-labelledby="market-account-title" onClick={(event) => event.stopPropagation()}>
+        <header><div><span>FLX ACCOUNT</span><h2 id="market-account-title">Profile & workspaces</h2></div><button type="button" aria-label="Close profile" onClick={() => setIsOpen(false)}><X size={18} /></button></header>
+        <div className="market-account-identity"><span>{profile.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span><div><strong>{profile.name}</strong><small>{profile.email} · {role} profile</small></div></div>
+        <form onSubmit={(event) => { event.preventDefault(); localStorage.setItem(storageKey, JSON.stringify(profile)); setNotice('Profile changes saved.'); }}>
+          <label>Full name<input value={profile.name} onChange={(event) => updateProfile('name', event.target.value)} required /></label>
+          <label>Email address<input type="email" value={profile.email} onChange={(event) => updateProfile('email', event.target.value)} required /></label>
+          <label>Phone number<input value={profile.phone} onChange={(event) => updateProfile('phone', event.target.value)} /></label>
+          <button className="market-account-save" type="submit"><Check size={15} /> Save profile</button>
+        </form>
+        {notice && <p className="market-account-notice" role="status">{notice}</p>}
+        <div className="market-account-workspaces"><span>LOG IN AS ANOTHER ROLE</span>{([
+          ['Client', 'Marketplace', UserRound],
+          ['Agent', 'Agent workspace', BriefcaseBusiness],
+          ['Owner', 'Owner workspace', Building2],
+          ['Ops', 'Operations center', ShieldCheck],
+        ] as const).map(([nextRole, label, Icon]) => <button type="button" key={nextRole} onClick={() => openWorkspace(nextRole)}><Icon size={16} /><span>{label}</span><ArrowRight size={14} /></button>)}</div>
+        <button className="market-account-signout" type="button" onClick={handleSignOut}><LogOut size={15} /> Sign out and return to marketplace</button>
+      </section>
+    </div>}
+  </>;
+}
+
 export function MarketplaceReferencePage() {
   const [listings, setListings] = useState<MarketListing[]>(fallbackListings);
   const [activeCategory, setActiveCategory] = useState('All Units');
@@ -112,11 +173,34 @@ export function MarketplaceReferencePage() {
       .catch(() => setNotice({ tone: 'error', message: 'Live inventory is unavailable. Showing the latest cached market view.' }));
   }, []);
 
+  useEffect(() => {
+    const syncCategoryFromHash = () => {
+      const hashCategories: Record<string, string> = {
+        '#marketplace': 'All Units',
+        '#hostels': 'Student Hostels',
+        '#commercial': 'Commercial Offices',
+        '#land': 'Cadastral Plots & Land',
+      };
+      const category = hashCategories[window.location.hash.toLowerCase()];
+      if (category) setActiveCategory(category);
+    };
+
+    syncCategoryFromHash();
+    window.addEventListener('hashchange', syncCategoryFromHash);
+    return () => window.removeEventListener('hashchange', syncCategoryFromHash);
+  }, []);
+
   const visibleListings = useMemo(() => {
-    const category = activeCategory === 'All Units' ? null : activeCategory.replace('s', '').replace('Student Hostels', 'Student Living');
+    const categoryTypes: Record<string, MarketListing['type'][]> = {
+      'Student Hostels': ['Student Living'],
+      'Commercial Offices': ['Commercial'],
+      'Cadastral Plots & Land': ['Land'],
+      'Luxury Flats': ['Residential'],
+    };
+    const categoryTypesForFilter = categoryTypes[activeCategory];
     const filtered = listings.filter((listing) => {
       const haystack = `${listing.title} ${listing.city} ${listing.type} ${listing.tag}`.toLowerCase();
-      return (!query || haystack.includes(query.toLowerCase())) && (!category || listing.type.toLowerCase().includes(category.toLowerCase()));
+      return (!query || haystack.includes(query.toLowerCase())) && (!categoryTypesForFilter || categoryTypesForFilter.includes(listing.type));
     });
     return [...filtered].sort((a, b) => sort === 'Price: Low to High' ? Number(a.price.replace(/[^0-9]/g, '')) - Number(b.price.replace(/[^0-9]/g, '')) : a.id - b.id);
   }, [activeCategory, listings, query, sort]);
@@ -137,7 +221,7 @@ export function MarketplaceReferencePage() {
     } catch { setNotice({ tone: 'error', message: 'Could not update your watchlist.' }); }
   };
 
-  const submitInspection = async (event: React.FormEvent<HTMLFormElement>) => {
+  const submitInspection = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!selected || !inspectionName || !inspectionEmail) return;
     try {
@@ -151,7 +235,7 @@ export function MarketplaceReferencePage() {
   };
 
   return <div className="market-reference-page">
-    <header className="market-reference-header"><button className="market-reference-brand" type="button" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}><span>FLX</span> Realty</button><div className="market-reference-location"><MapPin size={14} /><span><small>ZONE</small>Dar es Salaam</span><ChevronDown size={13} /></div><nav><a href="#marketplace">Marketplace & Geospatial Search</a><a href="#hostels">Hostels & Student Living</a><a href="#commercial">Commercial & Offices</a><a href="#land">Cadastral Land & Titles</a><a href="#escrow">Escrow Deals</a><a href="#owner">Owner OS</a></nav><div className="market-reference-tools"><span>TZS</span><span>EN • SW</span><button type="button" aria-label="Saved" onClick={() => setNotice({ tone: 'success', message: `${saved.length} listings saved.` })}><Heart size={15} /></button><button type="button" aria-label="Notifications"><Bell size={15} /></button><button className="market-reference-avatar" type="button">AM</button></div></header>
+    <header className="market-reference-header"><button className="market-reference-brand" type="button" onClick={() => { window.location.hash = 'marketplace'; window.scrollTo({ top: 0, behavior: 'smooth' }); }}><span>FLX</span> Realty</button><div className="market-reference-location"><MapPin size={14} /><span><small>ZONE</small>Dar es Salaam</span><ChevronDown size={13} /></div><nav><a href="#marketplace">Marketplace & Geospatial Search</a><a href="#hostels">Hostels & Student Living</a><a href="#commercial">Commercial & Offices</a><a href="/cadastral">Cadastral Land & Titles</a><a href="/legal/escrow">Escrow Deals</a><a href="/owner">Owner OS</a></nav><div className="market-reference-tools"><span>TZS</span><span>EN • SW</span><button type="button" aria-label="Saved" onClick={() => setNotice({ tone: 'success', message: `${saved.length} listings saved.` })}><Heart size={15} /></button><button type="button" aria-label="Notifications"><Bell size={15} /></button><MarketplaceAccountAccess role="Client" /></div></header>
     <main className="market-reference-main" id="marketplace">
       <div className="market-reference-search"><div><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Dar es Salaam Central • UDSM Commute Radius • Kinondoni Coastal" /></div><button type="button" onClick={() => setNotice({ tone: 'success', message: `${visibleListings.length} live units match your query.` })}><CircleDollarSign size={14} /> Execute Geo-Query</button><button type="button"><Layers3 size={14} /> Layers</button></div>
       <div className="market-reference-categories">{['All Units', 'Student Hostels', 'Commercial Offices', 'Cadastral Plots & Land', 'Luxury Flats'].map((category) => <button key={category} type="button" className={activeCategory === category ? 'is-active' : ''} onClick={() => setActiveCategory(category)}>{category}<b>{category === 'All Units' ? 142 : category === 'Student Hostels' ? 58 : category === 'Commercial Offices' ? 24 : category === 'Cadastral Plots & Land' ? 38 : 22}</b></button>)}<label>Sort: <select value={sort} onChange={(event) => setSort(event.target.value)}><option>Ministry Vetted (NLLS Live)</option><option>Price: Low to High</option></select></label></div>

@@ -30,6 +30,7 @@ import {
   LogOut,
   Settings2,
   UsersRound,
+  Wifi,
   LocateFixed,
   CalendarDays,
   Phone,
