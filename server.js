@@ -651,6 +651,20 @@ export const createApp = () => {
     res.json({ deals: rows });
   });
 
+  app.post('/api/legal/actions', (req, res) => {
+    const { transactionId, action, rail, phone } = req.body || {};
+    if (!transactionId || !action) {
+      return res.status(400).json({ error: 'transactionId and action are required.' });
+    }
+
+    const current = db.prepare('SELECT key_value FROM app_data WHERE key_name = ?').get('legalActions');
+    const actions = current ? JSON.parse(current.key_value) : [];
+    const nextAction = { id: Date.now(), transactionId, action, rail: rail || null, phone: phone || null, created_at: new Date().toISOString() };
+    actions.unshift(nextAction);
+    db.prepare('INSERT INTO app_data (key_name, key_value) VALUES (?, ?) ON CONFLICT(key_name) DO UPDATE SET key_value = excluded.key_value').run('legalActions', JSON.stringify(actions));
+    res.status(201).json({ ok: true, action: nextAction, actions });
+  });
+
   app.get('/api/dashboard', (_req, res) => {
     const metrics = db.prepare('SELECT key_name, key_value FROM owner_metrics').all();
     const map = Object.fromEntries(metrics.map((item) => [item.key_name, item.key_value]));

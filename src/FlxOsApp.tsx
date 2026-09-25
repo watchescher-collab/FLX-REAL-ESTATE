@@ -3,6 +3,7 @@ import { RealEstateLeafletMap } from "./components/RealEstateLeafletMap";
 import { HostelDetailPage } from "./components/HostelDetailPage";
 import { MarketplaceReferencePage } from "./components/MarketplaceReferencePage";
 import { OwnerDashboardReferencePage } from "./components/OwnerDashboardReferencePage";
+import { LegalEscrowConsolePage } from "./components/LegalEscrowConsolePage";
 import type { Property } from "./types";
 import {
   Activity,
@@ -1080,6 +1081,10 @@ export default function FlxOsApp() {
 
   if (window.location.pathname === '/owner' || window.location.pathname === '/owner/dashboard') {
     return <OwnerDashboardReferencePage />;
+  }
+
+  if (window.location.pathname === '/legal' || window.location.pathname === '/legal/escrow') {
+    return <LegalEscrowConsolePage />;
   }
 
   if (window.location.pathname === '/' || window.location.pathname === '/marketplace') {
