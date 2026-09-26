@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
-import type { ChangeEvent, ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, KeyboardEvent, ReactElement } from "react";
 import { RealEstateLeafletMap } from "./components/RealEstateLeafletMap";
 import { HostelDetailPage } from "./components/HostelDetailPage";
-import { MarketplaceReferencePage } from "./components/MarketplaceReferencePage";
-import { OwnerDashboardReferencePage } from "./components/OwnerDashboardReferencePage";
-import { LegalEscrowConsolePage } from "./components/LegalEscrowConsolePage";
+import { MarketplaceClientFlow } from "./components/MarketplaceClientFlow";
+import { OwnerDataStatusPage } from "./components/OwnerDataStatusPage";
+import { LegalEscrowStatusPage } from "./components/LegalEscrowStatusPage";
 import { CadastralDiligencePage } from "./components/CadastralDiligencePage";
-import { signOut as signOutApi } from "./auth";
+import "./components/opsControl.css";
+import { getStoredToken, signIn as signInApi, signOut as signOutApi } from "./auth";
 import type { Property } from "./types";
 import {
   Activity,
@@ -70,12 +71,53 @@ type ClientDashboard = {
   tickets?: Array<{ id: number; title: string; status: string; eta: string }>;
 };
 
+type AgentLead = {
+  id: string;
+  title: string;
+  note: string;
+  client_name?: string;
+  client_email?: string;
+  client_phone?: string;
+  source?: string;
+  intent?: "Buy" | "Rent";
+  budget?: number | null;
+  preferred_area?: string;
+  stage?: "New" | "Contacted" | "Qualified" | "Viewing" | "Offer" | "Won" | "Lost";
+  urgency?: string;
+  next_contact_at?: string | null;
+  assigned_agent_id?: string | null;
+  created_at?: string;
+};
+
+type NewAgentLead = {
+  title: string;
+  note: string;
+  client_name: string;
+  client_email: string;
+  client_phone: string;
+  source: string;
+  intent: "Buy" | "Rent";
+  budget: string;
+  preferred_area: string;
+  property_id: string;
+  consent: boolean;
+  urgency: string;
+  next_contact_at: string;
+  assigned_agent_id: string;
+};
+
 type AgentDashboard = {
   profile?: { name: string; title: string };
+  accessError?: string;
   stats?: Array<{ label: string; value: string; delta: string }>;
-  leads?: Array<{ id: number; title: string; note: string }>;
+  leads?: AgentLead[];
   deals?: Array<{ id: number; title: string; status: string; note: string }>;
   contracts?: Array<{ id: number; title: string; note: string }>;
+};
+
+const crmAuthHeaders = () => {
+  const token = getStoredToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 };
 
 type OwnerDashboard = {
@@ -90,9 +132,17 @@ type OwnerDashboard = {
 
 type OpsDashboard = {
   queue?: Array<{ label: string; status: string; details: string }>;
-  paymentSummary?: { balance: string; flags: string };
-  disputes?: Array<{ title: string; summary: string; action: string }>;
+  paymentSummary?: { balance?: string; flags?: string } | null;
+  disputes?: Array<{ title: string; summary: string; action: string; status?: string; resolvedAt?: string }>;
+  auditTrail?: Array<{ id: string; action: string; target: string; at: string }>;
 };
+
+type OpsSearchCategory = 'Property' | 'Parcel' | 'Person' | 'Case' | 'Escrow deal' | 'Transaction';
+type OpsSearchRecord = { id: string; category: OpsSearchCategory; title: string; detail: string; source: string; status?: string };
+type OpsHealthState = 'Checking' | 'Connected' | 'Stale' | 'Unavailable' | 'Not configured' | 'Configured, not probed';
+type OpsHealthItem = { id: string; label: string; state: OpsHealthState; detail: string; checkedAt?: string };
+type EscrowDealRecord = { id: number; title: string; status: string; amount: string; progress: number; created_at?: string };
+type PendingOpsAction = { title: string; message: string; confirmLabel: string; run: () => void };
 
 const fallbackListings: Listing[] = [
   {
@@ -277,7 +327,7 @@ function TopBar({
       {role !== "Explore" ? (
         <div className="os-context-row">
           <div>
-            <span className="os-kicker">FLX REALTY • DAR ES SALAAM</span>
+            <span className="os-kicker">FLX REAL ESTATE • DAR ES SALAAM</span>
             <h1>
               {role === "Client"
                 ? "Client Dashboard"
@@ -380,7 +430,7 @@ function ExploreScreen({
     },
     agent: {
       id: "flx-demo",
-      name: "FLX Realty",
+      name: "FLX Real Estate",
       avatar: "",
       phone: "+255 712 345 678",
       email: "hello@flxrealty.com",
@@ -426,7 +476,7 @@ function ExploreScreen({
       {compareIds.length > 0 ? <div className="os-market-compare-tray"><span><b>{compareIds.length}</b> selected</span><strong>Side-by-Side Comparison</strong><small>Compare selected property specifications</small><button onClick={() => setCompareIds([])}>Clear</button><button className="os-primary-button">Launch specs matrix <ArrowRight size={13} /></button></div> : null}
       <div className="os-market-pagination"><span>Showing 1 to {visibleListings.length} of 142 cadastral assets</span><button>Previous</button><b>1</b><button>2</button><button>3</button><button>Next</button></div>
       <section className="os-conveyance-band"><ShieldCheck size={20} /><div><strong>FLX Sovereign Conveyance Framework</strong><span>Every parcel and property is reconciled against the Ministry of Lands and Bank of Tanzania standards.</span></div><span>e-Ardhi verified</span><span>RTK GPS demarcation</span></section>
-      <footer className="os-market-footer"><div><strong>FLX Realty</strong><span>Fast, authoritative property infrastructure for coastal East Africa.</span></div><div><b>Marketplace</b><span>Dar es Salaam properties</span><span>Student living</span></div><div><b>Due diligence</b><span>Ministry title verification</span><span>Cadastral boundary surveys</span></div><div><b>FLX Portal</b><span>Owner operating system</span><span>Market pulse</span></div></footer>
+      <footer className="os-market-footer"><div><strong>FLX Real Estate</strong><span>Property information from the FLX field team.</span></div><div><b>Marketplace</b><span>Dar es Salaam properties</span><span>Student living</span></div><div><b>Due diligence</b><span>Title and location records</span><span>Property map</span></div><div><b>Contact</b><span>Send a question to FLX</span><span>Availability confirmed by an agent</span></div></footer>
     </main>
   );
 }
@@ -584,73 +634,161 @@ function ClientScreen({
   return <main className="os-main">{clientViews[activeView] ?? clientViews.home}</main>;
 }
 
-function AgentScreen({ activeView, dashboard, onAddLead, onReviewLead, onReviewDeal }: { activeView: string; dashboard: AgentDashboard; onAddLead: (title: string, note: string) => void; onReviewLead: (leadId: number) => void; onReviewDeal: (dealId: number) => void; }) {
-  const [leadTitle, setLeadTitle] = useState("");
-  const [leadNote, setLeadNote] = useState("");
+function AgentScreen({ activeView, dashboard, onAddLead, onUpdateLeadStage, onBulkAssign, onReviewDeal, onAuthenticate }: { activeView: string; dashboard: AgentDashboard; onAddLead: (lead: NewAgentLead) => Promise<void>; onUpdateLeadStage: (leadId: string, stage: NonNullable<AgentLead["stage"]>, lossReason?: string) => Promise<void>; onBulkAssign: (leadIds: string[], assignedAgentId: string) => Promise<void>; onReviewDeal: (dealId: number) => void; onAuthenticate: () => Promise<void>; }) {
+  const [leadForm, setLeadForm] = useState<NewAgentLead>({ title: "", note: "", client_name: "", client_email: "", client_phone: "", source: "Agent intake", intent: "Buy", budget: "", preferred_area: "", property_id: "", consent: false, urgency: "Normal", next_contact_at: "", assigned_agent_id: "" });
+  const [leadFormMessage, setLeadFormMessage] = useState("");
+  const [leadSearch, setLeadSearch] = useState("");
+  const [leadStageFilter, setLeadStageFilter] = useState("All");
+  const [expandedLeadId, setExpandedLeadId] = useState<string | null>(null);
+  const [activityByLead, setActivityByLead] = useState<Record<string, Array<{ type: string; body: string; actor_id: string; created_at: string }>>>({});
+  const [lossLeadId, setLossLeadId] = useState<string | null>(null);
+  const [lossReason, setLossReason] = useState("");
+  const [leadActionMessage, setLeadActionMessage] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [assignmentAgentId, setAssignmentAgentId] = useState("");
+  const [reviewingDeal, setReviewingDeal] = useState<NonNullable<AgentDashboard["deals"]>[number] | null>(null);
   const leads = dashboard.leads ?? [];
+  const visibleLeads = leads.filter((lead) => {
+    const query = leadSearch.trim().toLowerCase();
+    const matchesSearch = !query || `${lead.title} ${lead.client_name ?? ""} ${lead.client_email ?? ""} ${lead.client_phone ?? ""} ${lead.preferred_area ?? ""}`.toLowerCase().includes(query);
+    return matchesSearch && (leadStageFilter === "All" || lead.stage === leadStageFilter);
+  });
   const deals = dashboard.deals ?? [];
   const contracts = dashboard.contracts ?? [];
+  const agentName = dashboard.profile?.name || 'Agent';
+  const agentInitials = agentName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase();
+  const leadStages: NonNullable<AgentLead["stage"]>[] = ["New", "Contacted", "Qualified", "Viewing", "Offer", "Won", "Lost"];
+
+  if (dashboard.accessError) {
+    return <main className="os-main"><section className="crm-access-state"><h2>CRM access unavailable</h2><p>{dashboard.accessError}</p><form onSubmit={async (event) => { event.preventDefault(); setAuthMessage(""); try { await signInApi(authEmail, authPassword); await onAuthenticate(); } catch (error) { setAuthMessage(error instanceof Error ? error.message : "Sign-in failed."); } }}><label>Email<input type="email" autoComplete="username" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} required /></label><label>Password<input type="password" autoComplete="current-password" value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} required /></label><button className="os-primary-button" type="submit">Sign in</button>{authMessage && <p role="alert">{authMessage}</p>}</form></section></main>;
+  }
+
+  const updateLeadForm = (field: keyof NewAgentLead, value: string | boolean) => setLeadForm((current) => ({ ...current, [field]: value }));
+  const submitLead = async () => {
+    setLeadFormMessage("");
+    try {
+      await onAddLead(leadForm);
+      setLeadForm({ title: "", note: "", client_name: "", client_email: "", client_phone: "", source: "Agent intake", intent: "Buy", budget: "", preferred_area: "", property_id: "", consent: false, urgency: "Normal", next_contact_at: "", assigned_agent_id: "" });
+      setLeadFormMessage("Lead saved.");
+    } catch (error) {
+      setLeadFormMessage(error instanceof Error ? error.message : "Lead could not be saved.");
+    }
+  };
+
+  const toggleLeadActivity = async (leadId: string) => {
+    if (expandedLeadId === leadId) {
+      setExpandedLeadId(null);
+      return;
+    }
+    setExpandedLeadId(leadId);
+    if (activityByLead[leadId]) return;
+    const response = await fetch(`/api/agent/leads/${encodeURIComponent(leadId)}/activities`, { headers: crmAuthHeaders() });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      setLeadActionMessage(payload?.error || "Activity history could not be loaded.");
+      return;
+    }
+    setActivityByLead((current) => ({ ...current, [leadId]: payload.activities ?? [] }));
+  };
+
+  const changeLeadStage = async (leadId: string, stage: NonNullable<AgentLead["stage"]>) => {
+    setLeadActionMessage("");
+    if (stage === "Lost") {
+      setLossLeadId(leadId);
+      return;
+    }
+    try {
+      await onUpdateLeadStage(leadId, stage);
+      setLeadActionMessage("Lead stage updated.");
+      setActivityByLead((current) => { const next = { ...current }; delete next[leadId]; return next; });
+    } catch (error) {
+      setLeadActionMessage(error instanceof Error ? error.message : "Lead stage could not be updated.");
+    }
+  };
 
   const agentViews: Record<string, ReactElement> = {
     overview: (
       <>
         <section className="os-profile-card os-agent-card">
-          <div className="os-profile-avatar photo">DM</div>
-          <div className="os-profile-copy"><strong>Daudi M.</strong><span>BRELA No. RLCA-2024-TZ-8841 • FLX Verified</span></div>
+          <div className="os-profile-avatar">{agentInitials}</div>
+          <div className="os-profile-copy"><strong>{agentName}</strong><span>{dashboard.profile?.title || 'Agent account'}</span></div>
           <QrCode size={23} />
           <div className="os-agent-metrics">
-            <div><span>Active Leads</span><strong>28 <small>+5</small></strong></div>
-            <div><span>Target Hit</span><strong>82% <small>Mtd</small></strong></div>
-            <div><span>Conversion</span><strong>34% <small>Top 5%</small></strong></div>
+            <div><span>Active leads</span><strong>{leads.filter((lead) => lead.stage !== "Won" && lead.stage !== "Lost").length}</strong><small>CRM records excluding Won and Lost</small></div>
+            <div><span>Target attainment</span><strong>Unavailable</strong><small>No configured target source</small></div>
+            <div><span>Conversion</span><strong>Unavailable</strong><small>Outcome history is not complete</small></div>
           </div>
         </section>
         <section className="os-ledger-card">
-          <div className="os-section-heading"><h2><Landmark size={17} /> Financial Ledger</h2><span className="os-orange-pill">BOT Compliant</span></div>
-          <div className="os-ledger-total"><span>AVAILABLE LIQUID COMMISSION</span><strong>TZS 2,350,000 <small>Net</small></strong><button className="os-danger-button">⚡ Cashout</button><small>M-Pesa → CRDB Direct</small></div>
-          <div className="os-pipeline-row"><span>Active Deal Pipeline<small>3 closings releasing ≤14d</small></span><strong>TZS 4,200,000</strong></div>
+          <div className="os-section-heading"><h2><Landmark size={17} /> Commission ledger</h2><span>Unavailable</span></div>
+          <p className="crm-ledger-notice">No verified transaction or payout connector is configured. Commission balances and cashout are disabled.</p>
         </section>
         <section className="os-utility-card">
-          <div className="os-section-heading"><h2><UsersRound size={17} /> Add new lead</h2><span>CRM sync</span></div>
-          <div className="os-ticket-form">
-            <input value={leadTitle} onChange={(event) => setLeadTitle(event.target.value)} placeholder="Lead name or campaign" />
-            <input value={leadNote} onChange={(event) => setLeadNote(event.target.value)} placeholder="Lead note" />
-            <button className="os-primary-button" onClick={() => { if (!leadTitle.trim()) return; onAddLead(leadTitle.trim(), leadNote.trim() || 'New lead added from FLX intake'); setLeadTitle(''); setLeadNote(''); }}>Save lead</button>
+          <div className="os-section-heading"><h2><UsersRound size={17} /> Qualify a lead</h2><span>CRM record</span></div>
+          <div className="crm-lead-form">
+            <label>Contact name<input value={leadForm.client_name} onChange={(event) => updateLeadForm("client_name", event.target.value)} autoComplete="name" required /></label>
+            <label>Email<input type="email" value={leadForm.client_email} onChange={(event) => updateLeadForm("client_email", event.target.value)} autoComplete="email" /></label>
+            <label>Phone<input type="tel" value={leadForm.client_phone} onChange={(event) => updateLeadForm("client_phone", event.target.value)} autoComplete="tel" /></label>
+            <label>Lead / campaign<input value={leadForm.title} onChange={(event) => updateLeadForm("title", event.target.value)} placeholder="e.g. Mbezi rental search" required /></label>
+            <label>Source<input value={leadForm.source} onChange={(event) => updateLeadForm("source", event.target.value)} /></label>
+            <label>Intent<select value={leadForm.intent} onChange={(event) => updateLeadForm("intent", event.target.value)}><option>Buy</option><option>Rent</option></select></label>
+            <label>Budget (TZS)<input type="number" min="0" value={leadForm.budget} onChange={(event) => updateLeadForm("budget", event.target.value)} /></label>
+            <label>Preferred area<input value={leadForm.preferred_area} onChange={(event) => updateLeadForm("preferred_area", event.target.value)} /></label>
+            <label>Preferred property ID<input value={leadForm.property_id} onChange={(event) => updateLeadForm("property_id", event.target.value)} /></label>
+            <label>Urgency<select value={leadForm.urgency} onChange={(event) => updateLeadForm("urgency", event.target.value)}><option>Low</option><option>Normal</option><option>High</option><option>Urgent</option></select></label>
+            <label>Next contact<input type="datetime-local" value={leadForm.next_contact_at ? new Date(new Date(leadForm.next_contact_at).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : ""} onChange={(event) => updateLeadForm("next_contact_at", event.target.value ? new Date(event.target.value).toISOString() : "")} /></label>
+            <label>Assigned agent ID<input value={leadForm.assigned_agent_id} onChange={(event) => updateLeadForm("assigned_agent_id", event.target.value)} /></label>
+            <label className="crm-consent"><input type="checkbox" checked={leadForm.consent} onChange={(event) => updateLeadForm("consent", event.target.checked)} /> Contact consent recorded</label>
+            <label className="crm-form-wide">Requirements / notes<textarea value={leadForm.note} onChange={(event) => updateLeadForm("note", event.target.value)} rows={2} /></label>
+            <button className="os-primary-button crm-form-submit" onClick={() => void submitLead()} disabled={!leadForm.client_name.trim() || !leadForm.title.trim() || (!leadForm.client_email.trim() && !leadForm.client_phone.trim())}>Save lead</button>
+            {leadFormMessage && <p className="crm-form-message" role="status">{leadFormMessage}</p>}
           </div>
         </section>
       </>
     ),
     leads: (
       <section>
-        <div className="os-section-heading"><h2>Fresh Leads</h2><span>{leads.length} active</span></div>
-        <div className="os-action-grid">
-          {leads.map((lead) => (
-            <button key={lead.id} onClick={() => onReviewLead(lead.id)}><UsersRound size={18} /><strong>{lead.title}</strong><small>{lead.note}</small></button>
-          ))}
-        </div>
+        <div className="os-section-heading"><h2>Lead pipeline</h2><span>{visibleLeads.length} of {leads.length}</span></div>
+        <div className="crm-lead-toolbar"><label>Search leads<input type="search" value={leadSearch} onChange={(event) => setLeadSearch(event.target.value)} placeholder="Name, email, phone, area" /></label><label>Stage<select value={leadStageFilter} onChange={(event) => setLeadStageFilter(event.target.value)}><option>All</option>{leadStages.map((stage) => <option key={stage}>{stage}</option>)}</select></label></div>
+        <div className="crm-bulk-toolbar"><span>{selectedLeadIds.length} selected</span><label>Assign agent ID<input value={assignmentAgentId} onChange={(event) => setAssignmentAgentId(event.target.value)} /></label><button disabled={!selectedLeadIds.length || !assignmentAgentId.trim()} onClick={async () => { try { await onBulkAssign(selectedLeadIds, assignmentAgentId.trim()); setSelectedLeadIds([]); setLeadActionMessage("Selected leads assigned."); } catch (error) { setLeadActionMessage(error instanceof Error ? error.message : "Assignment failed."); } }}>Assign selected</button></div>
+        {leadActionMessage && <p className="crm-form-message" role="status">{leadActionMessage}</p>}
+        {visibleLeads.length === 0 ? <p className="crm-empty-state">No leads match these filters.</p> : visibleLeads.map((lead) => (
+          <article className="crm-lead-row" key={lead.id}>
+            <div className="crm-lead-summary"><label className="crm-lead-select"><input type="checkbox" aria-label={`Select ${lead.client_name || lead.title}`} checked={selectedLeadIds.includes(lead.id)} onChange={(event) => setSelectedLeadIds((current) => event.target.checked ? [...current, lead.id] : current.filter((id) => id !== lead.id))} /> Select</label><strong>{lead.client_name || lead.title}</strong><span>{lead.title} · {lead.intent || "Intent not set"} · {lead.urgency || "Normal"}</span><small>{[lead.client_email, lead.client_phone, lead.preferred_area, lead.budget ? `TZS ${Number(lead.budget).toLocaleString()}` : ""].filter(Boolean).join(" · ") || lead.note || "Contact details not provided"}</small></div>
+            <label className="crm-stage-control">Lifecycle<select value={lead.stage || "New"} onChange={(event) => void changeLeadStage(lead.id, event.target.value as NonNullable<AgentLead["stage"]>)}>{leadStages.map((stage) => <option key={stage}>{stage}</option>)}</select></label>
+            <button className="crm-activity-toggle" onClick={() => void toggleLeadActivity(lead.id)} aria-expanded={expandedLeadId === lead.id}>Activity</button>
+            {lossLeadId === lead.id && <div className="crm-loss-entry"><label>Reason for loss<input value={lossReason} onChange={(event) => setLossReason(event.target.value)} /></label><button disabled={!lossReason.trim()} onClick={async () => { try { await onUpdateLeadStage(lead.id, "Lost", lossReason); setLossLeadId(null); setLossReason(""); setLeadActionMessage("Lead marked Lost."); setActivityByLead((current) => { const next = { ...current }; delete next[lead.id]; return next; }); } catch (error) { setLeadActionMessage(error instanceof Error ? error.message : "Stage update failed."); } }}>Confirm loss</button><button onClick={() => { setLossLeadId(null); setLossReason(""); }}>Cancel</button></div>}
+            {expandedLeadId === lead.id && <ol className="crm-timeline">{(activityByLead[lead.id] ?? []).map((activity, index) => <li key={`${activity.created_at}-${index}`}><strong>{activity.type.replaceAll("_", " ")}</strong><span>{activity.body}</span><time>{new Date(activity.created_at).toLocaleString()}</time></li>)}</ol>}
+          </article>
+        ))}
       </section>
     ),
     deals: (
       <section>
         <div className="os-section-heading"><h2>Deals Funnel</h2><span>{deals.length} in pipe</span></div>
-        {deals.map((deal) => (
-          <article className="os-deal-row" key={deal.id}><div><span className="os-deal-status">{deal.status}</span><strong>{deal.title}</strong><p>{deal.note}</p></div><button onClick={() => onReviewDeal(deal.id)}>Review</button></article>
+        {deals.length === 0 ? <p className="crm-empty-state">No verified deal records are connected.</p> : deals.map((deal) => (
+          <article className="os-deal-row" key={deal.id}><div><span className="os-deal-status">{deal.status}</span><strong>{deal.title}</strong><p>{deal.note}</p></div><button onClick={() => setReviewingDeal(deal)}>Open deal</button></article>
         ))}
+        {reviewingDeal && <div className="crm-deal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setReviewingDeal(null); }}><section className="crm-deal-dialog" role="dialog" aria-modal="true" aria-labelledby="crm-deal-title"><div className="os-section-heading"><h2 id="crm-deal-title">Deal record</h2><button onClick={() => setReviewingDeal(null)} aria-label="Close deal record">Close</button></div><dl><dt>Record ID</dt><dd>{reviewingDeal.id}</dd><dt>Current status</dt><dd>{reviewingDeal.status}</dd><dt>Summary</dt><dd>{reviewingDeal.note}</dd></dl><p>This imported deal summary has no verified offer, escrow, approval, or closing documents attached.</p><button className="os-primary-button" onClick={() => { onReviewDeal(reviewingDeal.id); setReviewingDeal({ ...reviewingDeal, status: "Reviewed" }); }}>Mark reviewed</button></section></div>}
       </section>
     ),
     contracts: (
       <section>
-        <div className="os-section-heading"><h2>Contracts</h2><span>Mkataba Pro</span></div>
-        <div className="os-action-grid">
+        <div className="os-section-heading"><h2>Contracts</h2><span>Unavailable</span></div>
+        {contracts.length ? <div className="os-action-grid">
           {contracts.map((contract) => (
             <button key={contract.id}><FileCheck2 size={18} /><strong>{contract.title}</strong><small>{contract.note}</small></button>
           ))}
-        </div>
+        </div> : <p className="crm-empty-state">No document service or contract records are connected.</p>}
       </section>
     ),
     settings: (
       <section className="os-utility-card">
         <div className="os-section-heading"><h2><Settings2 size={17} /> Agent Settings</h2><span>Account</span></div>
-        <div className="os-stat-grid"><div><span>Brand</span><strong>FLX Agent</strong><small>Active</small></div><div><span>Auto share</span><strong>On</strong><small>WhatsApp + SMS</small></div></div>
+        <div className="os-stat-grid"><div><span>Account</span><strong>{agentName}</strong><small>{dashboard.profile?.title || 'Agent'}</small></div><div><span>Communications</span><strong>Unavailable</strong><small>No approved delivery provider</small></div></div>
       </section>
     ),
   };
@@ -900,31 +1038,238 @@ function OwnerScreen({
   );
 }
 
-function OpsScreen({ activeView, dashboard, onAddIncident, onResolveIncident, onReleaseFunds, onAddQueueItem, onReviewQueueItem }: { activeView: string; dashboard: OpsDashboard; onAddIncident: (title: string, summary: string, action: string) => void; onResolveIncident: (incidentTitle: string) => void; onReleaseFunds: () => void; onAddQueueItem: (label: string, status: string, details: string) => void; onReviewQueueItem: (itemLabel: string) => void; }) {
+function OpsScreen({ activeView, dashboard, onAddIncident, onResolveIncident, onAddQueueItem, onReviewQueueItem, onDashboardUpdate }: { activeView: string; dashboard: OpsDashboard; onAddIncident: (title: string, summary: string, action: string) => Promise<void>; onResolveIncident: (incidentTitle: string) => Promise<void>; onAddQueueItem: (label: string, status: string, details: string) => Promise<void>; onReviewQueueItem: (itemLabel: string) => Promise<void>; onDashboardUpdate: (dashboard: OpsDashboard) => void; }) {
   const [incidentTitle, setIncidentTitle] = useState("");
   const [incidentSummary, setIncidentSummary] = useState("");
   const [queueLabel, setQueueLabel] = useState("");
   const [queueStatus, setQueueStatus] = useState("Pending");
   const [queueDetails, setQueueDetails] = useState("");
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchCategory, setSearchCategory] = useState('All records');
+  const [selectedRecord, setSelectedRecord] = useState<OpsSearchRecord | null>(null);
+  const [searchRecords, setSearchRecords] = useState<OpsSearchRecord[]>([]);
+  const [serviceHealth, setServiceHealth] = useState<OpsHealthItem[]>([]);
+  const [dataFreshness, setDataFreshness] = useState<'checking' | 'current' | 'stale' | 'unavailable'>('checking');
+  const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [pendingAction, setPendingAction] = useState<PendingOpsAction | null>(null);
+  const confirmationReturnFocus = useRef<HTMLElement | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const queue = dashboard.queue ?? [];
   const disputes = dashboard.disputes ?? [];
-  const paymentSummary = dashboard.paymentSummary ?? { balance: 'TZS 142,500,000', flags: '0 Security Flags • 100% Reconciled' };
+  const paymentSummary = dashboard.paymentSummary;
+  const activeDisputes = disputes.filter((item) => item.status !== 'Resolved');
+  const openQueue = queue.filter((item) => !/(verified|approved|resolved|closed|passed|completed|validated)/i.test(item.status));
+  const sourceIsAvailable = (id: string) => ['Connected', 'Stale'].includes(serviceHealth.find((item) => item.id === id)?.state ?? '');
+  const propertyRecords = searchRecords.filter((record) => record.category === 'Property' || record.category === 'Parcel');
+  const availablePropertyCount = propertyRecords.filter((record) => !record.status || /approved|available|active|verified|published|listed/i.test(record.status)).length;
+  const escrowDealRecords = searchRecords.filter((record) => record.category === 'Escrow deal');
+  const isSearchOpen = Boolean(searchQuery.trim()) || searchCategory !== 'All records';
+  const freshnessText = dataFreshness === 'current' ? 'Current snapshot' : dataFreshness === 'stale' ? 'Some sources are stale' : dataFreshness === 'unavailable' ? 'Data unavailable' : 'Checking sources';
+  const lastRefreshText = lastSuccessfulRefresh ? `Last successful refresh ${new Date(lastSuccessfulRefresh).toLocaleTimeString()}` : 'No successful refresh yet';
+  const runOpsAction = async (action: () => Promise<void>, successMessage: string) => {
+    setActionFeedback(null);
+    try {
+      await action();
+      setActionFeedback({ tone: 'success', message: successMessage });
+      return true;
+    } catch (error) {
+      setActionFeedback({ tone: 'error', message: error instanceof Error ? error.message : 'The action could not be saved.' });
+      return false;
+    }
+  };
+  const requestOpsConfirmation = (trigger: HTMLElement, action: PendingOpsAction) => {
+    confirmationReturnFocus.current = trigger;
+    setPendingAction(action);
+  };
+  const closeOpsConfirmation = () => {
+    setPendingAction(null);
+    requestAnimationFrame(() => confirmationReturnFocus.current?.focus());
+  };
+  const handleOpsConfirmationKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeOpsConfirmation();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not([disabled])');
+    const first = focusable.item(0);
+    const last = focusable.item(focusable.length - 1);
+    if (!first || !last) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  const operationalMetrics = [
+    { label: 'Cases awaiting review', value: sourceIsAvailable('ops') ? String(openQueue.length) : 'Unavailable', method: 'Count of Ops queue records not marked verified, approved, resolved, or closed.', source: 'Ops dashboard · current snapshot', category: 'Cases' },
+    { label: 'Active disputes', value: sourceIsAvailable('ops') ? String(activeDisputes.length) : 'Unavailable', method: 'Count of dispute records not marked resolved.', source: 'Ops dashboard · current snapshot', category: 'Cases' },
+    { label: 'Available properties', value: sourceIsAvailable('properties') ? String(availablePropertyCount) : 'Unavailable', method: 'Count of property/parcel records with an approved, available, or active status.', source: 'Property registry · current snapshot', category: 'Properties' },
+    { label: 'Escrow deal records', value: sourceIsAvailable('deals') ? String(escrowDealRecords.length) : 'Unavailable', method: 'Count of deal workflow records; not a measure of money received or released.', source: 'Escrow deals API · current snapshot', category: 'Escrow deals' },
+    { label: 'Settlement volume (24h)', value: 'Unavailable', method: 'Requires timestamped payment transaction records; no settlement feed is connected.', source: 'No transaction source configured', category: 'Transactions' },
+    { label: 'SLA compliance', value: 'Unavailable', method: 'Requires case due times and timestamped resolution events; these are not available.', source: 'No SLA event history configured', category: 'Cases' },
+  ];
+
+  useEffect(() => {
+    let isCurrent = true;
+    const sources = [
+      { id: 'backend', label: 'Backend API', path: '/api/health' },
+      { id: 'properties', label: 'Property registry', path: '/api/properties' },
+      { id: 'people', label: 'People and leads', path: '/api/agent/dashboard' },
+      { id: 'clients', label: 'Client records', path: '/api/client/dashboard' },
+      { id: 'ops', label: 'Ops cases', path: '/api/ops/dashboard' },
+      { id: 'deals', label: 'Escrow deal records', path: '/api/deals' },
+    ];
+
+    const refresh = async () => {
+      setIsRefreshing(true);
+      setDataFreshness((current) => current === 'current' ? 'current' : 'checking');
+      const results = await Promise.all(sources.map(async (source) => {
+        try {
+          const response = await fetch(source.path, { cache: 'no-store', ...(source.id === 'people' ? { headers: crmAuthHeaders() } : {}) });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return { ...source, ok: true, payload: await response.json() as Record<string, unknown>, error: '' };
+        } catch (error) {
+          return { ...source, ok: false, payload: null, error: error instanceof Error ? error.message : 'Request failed' };
+        }
+      }));
+      if (!isCurrent) return;
+
+      const byId = new Map(results.map((result) => [result.id, result]));
+      const opsResult = byId.get('ops');
+      if (opsResult?.ok && opsResult.payload) onDashboardUpdate(opsResult.payload as OpsDashboard);
+
+      const sourceRecords = new Map<string, OpsSearchRecord[]>();
+      const propertyResult = byId.get('properties');
+      if (propertyResult?.ok && propertyResult.payload) {
+        const rows = Array.isArray(propertyResult.payload.properties) ? propertyResult.payload.properties : [];
+        sourceRecords.set('properties', rows.map((entry, index) => {
+          const property = entry as Record<string, unknown>;
+          const title = String(property.title ?? `Property ${index + 1}`);
+          const location = String(property.city ?? property.address ?? 'Location unavailable');
+          const isParcel = /parcel|cadastral|land|plot/i.test(`${title} ${location} ${String(property.property_type ?? '')}`);
+          return { id: `property-${String(property.id ?? index)}`, category: isParcel ? 'Parcel' : 'Property', title, detail: `${location} · ${String(property.status ?? 'Status unavailable')}`, source: 'properties', status: String(property.status ?? '') };
+        }));
+      }
+
+      const peopleResult = byId.get('people');
+      if (peopleResult?.ok && peopleResult.payload) {
+        const payload = peopleResult.payload;
+        const personRecords: OpsSearchRecord[] = [];
+        for (const lead of (Array.isArray(payload.leads) ? payload.leads : []) as Array<Record<string, unknown>>) {
+          personRecords.push({ id: `lead-${String(lead.id ?? personRecords.length)}`, category: 'Person', title: String(lead.title ?? 'Lead'), detail: String(lead.note ?? 'Lead record'), source: 'people', status: 'Lead' });
+        }
+        for (const deal of (Array.isArray(payload.deals) ? payload.deals : []) as Array<Record<string, unknown>>) {
+          personRecords.push({ id: `contact-${String(deal.id ?? personRecords.length)}`, category: 'Person', title: String(deal.title ?? 'Contact'), detail: `${String(deal.status ?? 'Deal')} · ${String(deal.note ?? '')}`.trim(), source: 'people', status: String(deal.status ?? 'Deal') });
+        }
+        sourceRecords.set('people', personRecords);
+      }
+
+      const clientResult = byId.get('clients');
+      if (clientResult?.ok && clientResult.payload) {
+        const payload = clientResult.payload;
+        const clientRecords: OpsSearchRecord[] = [];
+        const resident = payload.resident as Record<string, unknown> | undefined;
+        if (resident?.name) clientRecords.push({ id: `resident-${String(resident.name)}`, category: 'Person', title: String(resident.name), detail: `${String(resident.property ?? '')} · ${String(resident.room ?? '')}`.trim(), source: 'clients', status: String(resident.status ?? 'Resident') });
+        sourceRecords.set('clients', clientRecords);
+      }
+
+      if (opsResult?.ok && opsResult.payload) {
+        const payload = opsResult.payload;
+        const cases: OpsSearchRecord[] = [];
+        for (const item of (Array.isArray(payload.queue) ? payload.queue : []) as Array<Record<string, unknown>>) {
+          cases.push({ id: `case-${String(item.label)}`, category: 'Case', title: String(item.label ?? 'Verification case'), detail: String(item.details ?? ''), source: 'ops', status: String(item.status ?? 'Open') });
+        }
+        for (const item of (Array.isArray(payload.disputes) ? payload.disputes : []) as Array<Record<string, unknown>>) {
+          cases.push({ id: `dispute-${String(item.title)}`, category: 'Case', title: String(item.title ?? 'Dispute'), detail: String(item.summary ?? ''), source: 'ops', status: String(item.status ?? 'Open') });
+        }
+        sourceRecords.set('ops', cases);
+      }
+
+      const dealsResult = byId.get('deals');
+      if (dealsResult?.ok && dealsResult.payload) {
+        const rows = Array.isArray(dealsResult.payload.deals) ? dealsResult.payload.deals : [];
+        sourceRecords.set('deals', rows.map((entry, index) => {
+          const deal = entry as Record<string, unknown>;
+          return { id: `escrow-${String(deal.id ?? index)}`, category: 'Escrow deal', title: String(deal.title ?? `Escrow deal ${index + 1}`), detail: `${String(deal.status ?? 'Status unavailable')} · ${String(deal.amount ?? 'Amount unavailable')}`, source: 'deals', status: String(deal.status ?? '') };
+        }));
+      }
+
+      setSearchRecords((current) => {
+        let next = current;
+        for (const [source, records] of sourceRecords) next = [...next.filter((record) => record.source !== source), ...records];
+        return next;
+      });
+
+      const checkedAt = new Date().toISOString();
+      setServiceHealth((previousItems) => {
+        const internalHealth = results.map((result) => {
+          const previous = previousItems.find((item) => item.id === result.id);
+          return { id: result.id, label: result.label, state: result.ok ? 'Connected' as const : previous?.state === 'Connected' || previous?.state === 'Stale' ? 'Stale' as const : 'Unavailable' as const, detail: result.ok ? 'Endpoint responded successfully.' : `Last check failed: ${result.error}`, checkedAt };
+        });
+        return [
+          ...internalHealth,
+          { id: 'ardhi', label: 'e-Ardhi registry', state: 'Not configured', detail: 'No integration health endpoint is configured.' },
+          { id: 'identity', label: 'NIDA identity checks', state: 'Not configured', detail: 'No integration health endpoint is configured.' },
+          { id: 'payments', label: 'Banks and mobile money', state: 'Not configured', detail: 'No settlement connector or health endpoint is configured.' },
+          { id: 'maps', label: 'Map tiles', state: 'Configured, not probed', detail: 'Map provider is configured; tile-service health is not probed.' },
+          { id: 'notifications', label: 'Notifications', state: 'Not configured', detail: 'No delivery provider or health endpoint is configured.' },
+        ];
+      });
+
+      const successfulSources = results.filter((result) => result.ok).length;
+      const failedSources = results.length - successfulSources;
+      setDataFreshness(successfulSources === 0 ? 'unavailable' : failedSources > 0 ? 'stale' : 'current');
+      if (successfulSources > 0) setLastSuccessfulRefresh(checkedAt);
+      setIsRefreshing(false);
+    };
+
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 60_000);
+    return () => { isCurrent = false; window.clearInterval(interval); };
+  }, [refreshVersion, onDashboardUpdate]);
+
+  const categories = ['All records', 'Properties', 'People', 'Parcels', 'Cases', 'Escrow deals', 'Transactions'];
+  const matchingRecords = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return searchRecords.filter((record) => {
+      const categoryMatches = searchCategory === 'All records'
+        || (searchCategory === 'Properties' && record.category === 'Property')
+        || (searchCategory === 'People' && record.category === 'Person')
+        || (searchCategory === 'Parcels' && record.category === 'Parcel')
+        || (searchCategory === 'Cases' && record.category === 'Case')
+        || (searchCategory === 'Escrow deals' && record.category === 'Escrow deal')
+        || (searchCategory === 'Transactions' && record.category === 'Transaction');
+      const queryMatches = !query || `${record.title} ${record.detail} ${record.status ?? ''} ${record.category}`.toLowerCase().includes(query);
+      return categoryMatches && queryMatches;
+    }).slice(0, 12);
+  }, [searchCategory, searchQuery, searchRecords]);
 
   const opsViews: Record<string, ReactElement> = {
     live: (
       <>
         <section className="os-ops-hero">
           <div><span className="os-kicker">REAL-TIME CADASTRAL VERIFICATION & PAYMENT CLEARING</span><h2>Dar Ops Command</h2><p>Automated compliance and settlement control.</p></div>
-          <div><span>SLA COMPLIANCE</span><strong>99.2%</strong></div>
-          <div className="os-ops-total"><span>24H PAYMENT FLOW</span><strong>{paymentSummary.balance}</strong><small>BOT FinTech Payment Directives v2.1 <b>ACTIVE</b></small></div>
+          <div><span>CASE SLA</span><strong>Unavailable</strong><small>No timestamped case history connected</small></div>
+          <div className="os-ops-total"><span>SETTLEMENT VOLUME · 24H</span><strong>Unavailable</strong><small>No transaction ledger connected</small></div>
         </section>
-        <div className="os-stat-grid"><div><span>QUEUE</span><strong>{queue.length} Subs</strong><small>NIDA, e-Ardhi, Student</small></div><div><span>DISPUTES</span><strong className="os-red-text">{disputes.length} Active</strong><small>{paymentSummary.flags}</small></div></div>
+        <div className="os-stat-grid"><div><span>VERIFICATION CASES</span><strong>{sourceIsAvailable('ops') ? `${openQueue.length} Open` : 'Unavailable'}</strong><small>Ops API · current snapshot</small></div><div><span>DISPUTES</span><strong className="os-red-text">{sourceIsAvailable('ops') ? `${activeDisputes.length} Active` : 'Unavailable'}</strong><small>{freshnessText} · {lastRefreshText}</small></div></div>
+        <section className="os-ops-health-card" aria-labelledby="ops-health-title">
+          <div className="os-section-heading"><h2 id="ops-health-title">Service and integration health</h2><button type="button" onClick={() => setRefreshVersion((version) => version + 1)} disabled={isRefreshing}>{isRefreshing ? 'Checking…' : 'Retry checks'}</button></div>
+          <p className="os-health-summary" role="status" aria-live="polite">{freshnessText}. {lastRefreshText}.</p>
+          <div className="os-health-grid">{serviceHealth.map((item) => <div className="os-health-item" key={item.id}><span className={`os-health-state is-${item.state.toLowerCase().replace(/[, ]+/g, '-')}`} aria-label={`${item.label}: ${item.state}`}>{item.state}</span><strong>{item.label}</strong><small>{item.detail}</small></div>)}</div>
+        </section>
         <section className="os-utility-card">
           <div className="os-section-heading"><h2><Bell size={17} /> Escalate incident</h2><span>Ops ledger</span></div>
           <div className="os-ticket-form">
-            <input value={incidentTitle} onChange={(event) => setIncidentTitle(event.target.value)} placeholder="Incident title" />
-            <input value={incidentSummary} onChange={(event) => setIncidentSummary(event.target.value)} placeholder="Incident summary" />
-            <button className="os-primary-button" onClick={() => { if (!incidentTitle.trim() || !incidentSummary.trim()) return; onAddIncident(incidentTitle.trim(), incidentSummary.trim(), 'Escalate case'); setIncidentTitle(''); setIncidentSummary(''); }}>Save incident</button>
+            <label><span className="os-sr-only">Incident title</span><input aria-label="Incident title" value={incidentTitle} onChange={(event) => setIncidentTitle(event.target.value)} placeholder="Incident title" /></label>
+            <label><span className="os-sr-only">Incident summary</span><input aria-label="Incident summary" value={incidentSummary} onChange={(event) => setIncidentSummary(event.target.value)} placeholder="Incident summary" /></label>
+            <button className="os-primary-button" type="button" disabled={!incidentTitle.trim() || !incidentSummary.trim()} onClick={() => { void runOpsAction(() => onAddIncident(incidentTitle.trim(), incidentSummary.trim(), 'Escalate case'), 'Incident saved to the Ops case log.').then((saved) => { if (saved) { setIncidentTitle(''); setIncidentSummary(''); } }); }}>Save incident</button>
           </div>
         </section>
       </>
@@ -933,28 +1278,45 @@ function OpsScreen({ activeView, dashboard, onAddIncident, onResolveIncident, on
       <section>
         <div className="os-section-heading"><h2><Activity size={17} /> Verification Queue</h2><span className="os-red-text">{queue.length} PENDING</span></div>
         <div className="os-ticket-form" style={{ marginBottom: 16 }}>
-          <input value={queueLabel} onChange={(event) => setQueueLabel(event.target.value)} placeholder="Verification item" />
-          <input value={queueStatus} onChange={(event) => setQueueStatus(event.target.value)} placeholder="Status" />
-          <input value={queueDetails} onChange={(event) => setQueueDetails(event.target.value)} placeholder="Details" />
-          <button className="os-primary-button" onClick={() => { if (!queueLabel.trim() || !queueDetails.trim()) return; onAddQueueItem(queueLabel.trim(), queueStatus.trim() || 'Pending', queueDetails.trim()); setQueueLabel(''); setQueueStatus('Pending'); setQueueDetails(''); }}>Add queue item</button>
+          <label><span className="os-sr-only">Verification item</span><input aria-label="Verification item" value={queueLabel} onChange={(event) => setQueueLabel(event.target.value)} placeholder="Verification item" /></label>
+          <label><span className="os-sr-only">Verification status</span><select aria-label="Verification status" value={queueStatus} onChange={(event) => setQueueStatus(event.target.value)}><option>Pending</option><option>In review</option><option>Evidence required</option></select></label>
+          <label><span className="os-sr-only">Verification details</span><input aria-label="Verification details" value={queueDetails} onChange={(event) => setQueueDetails(event.target.value)} placeholder="Details" /></label>
+          <button className="os-primary-button" type="button" disabled={!queueLabel.trim() || !queueDetails.trim()} onClick={() => { void runOpsAction(() => onAddQueueItem(queueLabel.trim(), queueStatus, queueDetails.trim()), 'Verification case saved.').then((saved) => { if (saved) { setQueueLabel(''); setQueueStatus('Pending'); setQueueDetails(''); } }); }}>Add queue item</button>
         </div>
+        {queue.length === 0 && <div className="os-empty-state" role="status"><h3>No verification cases</h3><p>Cases from registry, identity, and property workflows will appear when connected sources provide them.</p></div>}
         {queue.map((item, index) => (
-          <article className="os-verification-row" key={`${item.label}-${index}`}><div className="os-verification-icon">{index === 0 ? <MapPin size={16} /> : index === 1 ? <Home size={16} /> : <UserRound size={16} />}</div><div><span>{item.status}</span><strong>{item.label}</strong><small>{item.details}</small></div><button onClick={() => onReviewQueueItem(item.label)}>{/verified/i.test(item.status) ? "Reviewed" : index === 0 ? "Approve NLIS Seal" : "Approve"}</button></article>
+          <article className="os-verification-row" key={`${item.label}-${index}`}><div className="os-verification-icon">{index === 0 ? <MapPin size={16} /> : index === 1 ? <Home size={16} /> : <UserRound size={16} />}</div><div><span className="os-case-status" aria-label={`Case status: ${item.status}`}>{item.status}</span><strong>{item.label}</strong><small>{item.details}</small></div>{/(verified|approved|passed|validated|completed)/i.test(item.status) ? <span className="os-case-reviewed">Reviewed</span> : <button type="button" onClick={(event) => requestOpsConfirmation(event.currentTarget, { title: 'Approve verification case?', message: `Confirm review of ${item.label}. This records a verified status in the Ops dashboard.`, confirmLabel: 'Confirm approval', run: () => { void runOpsAction(() => onReviewQueueItem(item.label), 'Case approval saved.').then((saved) => { if (saved) closeOpsConfirmation(); }); } })}>Review and approve</button>}</article>
         ))}
       </section>
     ),
     monitor: (
-      <section className="os-vault-card"><div className="os-section-heading"><h2>Payment Monitor</h2><span>3 Transactions</span></div><strong>{paymentSummary.balance}</strong><p>Custodial Payment Balance<br /><span>{paymentSummary.flags}</span></p><button className="os-primary-button" onClick={onReleaseFunds}>Bulk Release Funds to Owners <Wallet size={15} /></button></section>
+      <section className="os-vault-card"><div className="os-section-heading"><h2>Payment Monitor</h2><span>{sourceIsAvailable('deals') ? `${escrowDealRecords.length} escrow deal records` : 'Source unavailable'}</span></div><strong>Settlement volume unavailable</strong><p>No settlement transaction source is connected. Escrow deal records below describe workflow status and are not proof of funds received or released.</p><div className="os-escrow-records">{escrowDealRecords.length ? escrowDealRecords.map((record) => <article key={record.id}><strong>{record.title}</strong><span>{record.status}</span><small>{record.detail}</small></article>) : <p>No escrow deal records loaded.</p>}</div><button className="os-primary-button" type="button" disabled aria-disabled="true">Funds release disabled · no payment connector</button></section>
     ),
     disputes: (
-      <section className="os-alert-card"><span className="os-orange-pill">HIGH THREAT</span><h3>{disputes[0]?.title || 'Ocean View Apartment Masaki'}</h3><p>{disputes[0]?.summary || 'Duplicate match: Cape Town Listing #921'}<br />IP Origin: Johannesburg (Foreign Proxy)</p><div><button className="os-danger-button" onClick={() => onResolveIncident(disputes[0]?.title || 'Ocean View Apartment Masaki')}>{disputes[0]?.action || 'Ban & Freeze Account'}</button><button className="os-secondary-button" onClick={() => onResolveIncident(disputes[0]?.title || 'Ocean View Apartment Masaki')}>Audit</button></div></section>
+      activeDisputes.length ? <section className="os-dispute-list">{activeDisputes.map((item) => <article className="os-alert-card" key={item.title}><span className="os-orange-pill" aria-label={`Case status: ${item.status || 'Open'}`}>{item.status || 'OPEN CASE'}</span><h3>{item.title}</h3><p>{item.summary}</p><div><button className="os-secondary-button" type="button" onClick={() => setSelectedRecord({ id: `dispute-${item.title}`, category: 'Case', title: item.title, detail: item.summary, source: 'Ops disputes', status: item.status || 'Open' })}>Review case</button><button className="os-danger-button" type="button" onClick={(event) => requestOpsConfirmation(event.currentTarget, { title: 'Resolve dispute?', message: `Confirm that ${item.title} has been reviewed and resolved. This action records a resolution status; it does not freeze an account or release funds.`, confirmLabel: 'Confirm resolution', run: () => { void runOpsAction(() => onResolveIncident(item.title), 'Dispute resolution saved.').then((saved) => { if (saved) closeOpsConfirmation(); }); } })}>Mark resolved</button></div></article>)}</section> : <section className="os-empty-state" role="status"><h2>No active disputes</h2><p>Disputes will appear here when they are created from a verified case or payment record.</p></section>
     ),
     audit: (
-      <section className="os-demand-card"><div className="os-section-heading"><h2>Dar Geospatial Demand</h2><span className="os-red-text">LIVE TELEMETRY</span></div><div className="os-demand-map"><span>3 High Surge Hotspots Active</span></div>{["UDSM & Ardhi Corridor", "Posta / CBD FinTech Hub", "Kigamboni Coastal Cadastral"].map((item, index) => <div className="os-demand-row" key={item}><strong>{item}</strong><span>{index === 0 ? "98% Bed Demand" : index === 1 ? "Surge Commercial" : "Diaspora Inquiries +42%"}</span><small>{index === 0 ? "Hostel shortfall: High search intensity from incoming undergraduates" : index === 1 ? "Turnkey suites 100-200 SQM requested by regional payment brokers" : "UK & Nordic remittance buyers prioritizing verified survey beacons"}</small></div>)}</section>
+      <div className="os-ops-analytics-stack"><section className="os-ops-analytics"><div className="os-section-heading"><div><h2>Operational analytics</h2><p>Actual record snapshots only; no forecast model is connected. {freshnessText} · {lastRefreshText}</p></div><button type="button" onClick={() => setRefreshVersion((version) => version + 1)} disabled={isRefreshing}>{isRefreshing ? 'Refreshing…' : 'Refresh data'}</button></div><div className="os-analytics-grid">{operationalMetrics.map((metric) => <button className="os-analytics-metric" type="button" key={metric.label} disabled={metric.value === 'Unavailable'} onClick={() => { setSearchCategory(metric.category); setSearchQuery(''); setSelectedRecord(null); }}><span>{metric.label}</span><strong>{metric.value}</strong><small>{metric.method}</small><em>{metric.source} · {metric.value === 'Unavailable' ? 'No drill-down available' : 'Open source records'}</em></button>)}</div></section><section className="os-ops-audit" aria-labelledby="ops-audit-title"><div className="os-section-heading"><h2 id="ops-audit-title">Recent Ops actions</h2><span>{dashboard.auditTrail?.length ?? 0} recorded</span></div>{dashboard.auditTrail?.length ? dashboard.auditTrail.slice(0, 20).map((entry) => <article key={entry.id}><strong>{entry.action}</strong><span>{entry.target}</span><time dateTime={entry.at}>{new Date(entry.at).toLocaleString()}</time></article>) : <p>No Ops action history has been recorded yet.</p>}</section></div>
     ),
   };
 
-  return <main className="os-main">{opsViews[activeView] ?? opsViews.live}</main>;
+  return <main className="os-main">
+    {actionFeedback && <div className={`os-action-feedback is-${actionFeedback.tone}`} role={actionFeedback.tone === 'error' ? 'alert' : 'status'} aria-live={actionFeedback.tone === 'error' ? 'assertive' : 'polite'}><span>{actionFeedback.message}</span><button type="button" aria-label="Dismiss action message" onClick={() => setActionFeedback(null)}><X size={15} /></button></div>}
+    <section className="os-global-search" aria-label="Global operations search">
+      <label><Search size={18} /><input aria-label="Search properties, people, parcels, cases, and transactions" value={searchQuery} onChange={(event) => { setSearchQuery(event.target.value); setSelectedRecord(null); }} placeholder="Search properties, people, parcels, cases, transactions..." /></label>
+      <select aria-label="Filter search category" value={searchCategory} onChange={(event) => { setSearchCategory(event.target.value); setSelectedRecord(null); }}>
+        {categories.map((category) => <option key={category}>{category}</option>)}
+      </select>
+      <span className={`os-data-freshness is-${dataFreshness}`} role="status" aria-live="polite">{freshnessText}</span>
+    </section>
+    {isSearchOpen && <section className="os-global-search-results" aria-label="Global search results">
+      <header><strong>{matchingRecords.length} matching records</strong><span>{lastRefreshText}</span></header>
+      {matchingRecords.length ? <div>{matchingRecords.map((record) => <button type="button" role="option" aria-selected={selectedRecord?.id === record.id} key={record.id} onClick={() => setSelectedRecord(record)}><span><strong>{record.title}</strong><small>{record.detail}</small></span><em>{record.category}</em></button>)}</div> : <p>{searchCategory === 'Transactions' ? 'No settlement transaction feed is connected. Escrow deal workflow records can be searched under Escrow deals.' : 'No matching records in the currently connected sources.'}</p>}
+    </section>}
+    {selectedRecord && <section className="os-search-record-detail" aria-label="Selected record details"><div><span>{selectedRecord.category} · {selectedRecord.source}</span><button type="button" aria-label="Close record details" onClick={() => setSelectedRecord(null)}><X size={16} /></button></div><h2>{selectedRecord.title}</h2><p>{selectedRecord.detail}</p>{selectedRecord.status && <small>Status: {selectedRecord.status}</small>}</section>}
+    {opsViews[activeView] ?? opsViews.live}
+    {pendingAction && <div className="os-confirm-backdrop"><section className="os-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="ops-confirm-title" aria-describedby="ops-confirm-message" onKeyDown={handleOpsConfirmationKeyDown}><h2 id="ops-confirm-title">{pendingAction.title}</h2><p id="ops-confirm-message">{pendingAction.message}</p><div><button type="button" autoFocus onClick={closeOpsConfirmation}>Cancel</button><button type="button" className="os-danger-button" onClick={pendingAction.run}>{pendingAction.confirmLabel}</button></div></section></div>}
+  </main>;
 }
 
 function DetailModal({
@@ -1105,11 +1467,11 @@ export default function FlxOsApp() {
   }
 
   if (window.location.pathname === '/owner' || window.location.pathname === '/owner/dashboard') {
-    return <OwnerDashboardReferencePage />;
+    return <OwnerDataStatusPage />;
   }
 
   if (window.location.pathname === '/legal' || window.location.pathname === '/legal/escrow') {
-    return <LegalEscrowConsolePage />;
+    return <LegalEscrowStatusPage />;
   }
 
   if (window.location.pathname === '/cadastral' || window.location.pathname === '/land/gezaulole') {
@@ -1117,13 +1479,13 @@ export default function FlxOsApp() {
   }
 
   if (window.location.pathname === '/' || window.location.pathname === '/marketplace') {
-    return <MarketplaceReferencePage />;
+    return <MarketplaceClientFlow />;
   }
 
   const emptyClientDashboard: ClientDashboard = { stats: [], reminders: [], tickets: [] };
   const emptyAgentDashboard: AgentDashboard = { stats: [], leads: [], deals: [], contracts: [] };
   const emptyOwnerDashboard: OwnerDashboard = { portfolio: { totalRevenue: 'TZS 0', occupancy: '0%', paymentBalance: 'TZS 0', units: [] }, maintenance: [] };
-  const emptyOpsDashboard: OpsDashboard = { queue: [], paymentSummary: { balance: 'TZS 0', flags: '0 Security Flags • 100% Reconciled' }, disputes: [] };
+  const emptyOpsDashboard: OpsDashboard = { queue: [], paymentSummary: null, disputes: [] };
 
   const [clientDashboard, setClientDashboard] = useState<ClientDashboard>(emptyClientDashboard);
   const [agentDashboard, setAgentDashboard] = useState<AgentDashboard>(emptyAgentDashboard);
@@ -1180,13 +1542,13 @@ export default function FlxOsApp() {
 
     Promise.all([
       fetch("/api/client/dashboard"),
-      fetch("/api/agent/dashboard"),
+      fetch("/api/agent/dashboard", { headers: crmAuthHeaders() }),
       fetch("/api/owner"),
       fetch("/api/ops/dashboard"),
     ])
       .then(async ([clientRes, agentRes, ownerRes, opsRes]) => {
         const clientPayload = clientRes.ok ? await clientRes.json() : emptyClientDashboard;
-        const agentPayload = agentRes.ok ? await agentRes.json() : emptyAgentDashboard;
+        const agentPayload = agentRes.ok ? await agentRes.json() : { ...emptyAgentDashboard, accessError: agentRes.status === 401 ? "Sign in with an Agent or Admin account to view CRM records." : "Your account is not authorized to access these CRM records." };
         const ownerPayload = ownerRes.ok ? await ownerRes.json() : emptyOwnerDashboard;
         const opsPayload = opsRes.ok ? await opsRes.json() : emptyOpsDashboard;
         setClientDashboard(clientPayload);
@@ -1194,7 +1556,7 @@ export default function FlxOsApp() {
         setOwnerDashboard(ownerPayload);
         setOpsDashboard(opsPayload);
       })
-      .catch(() => undefined);
+        .catch(() => setAgentDashboard({ ...emptyAgentDashboard, accessError: "The CRM service is unavailable. Check the API connection and try again." }));
   }, []);
 
   const handleAddTicket = (title: string, status: string, eta: string) => {
@@ -1233,34 +1595,50 @@ export default function FlxOsApp() {
     });
   };
 
-  const handleAddLead = (title: string, note: string) => {
-    fetch('/api/agent/leads', {
+  const handleAddLead = async (lead: NewAgentLead) => {
+    const response = await fetch('/api/agent/leads', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, note }),
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((payload) => {
-        if (payload?.dashboard) setAgentDashboard(payload.dashboard);
-      })
-      .catch(() => undefined);
+      headers: { 'Content-Type': 'application/json', ...crmAuthHeaders() },
+      body: JSON.stringify({
+        ...lead,
+        budget: lead.budget.trim() ? Number(lead.budget) : null,
+        next_contact_at: lead.next_contact_at || null,
+        assigned_agent_id: lead.assigned_agent_id || null,
+        property_id: lead.property_id || null,
+      }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error || 'Lead could not be saved.');
+    if (payload?.dashboard) setAgentDashboard(payload.dashboard);
   };
 
-  const handleReviewLead = (leadId: number) => {
-    setAgentDashboard((current) => {
-      const nextDashboard: AgentDashboard = {
-        ...current,
-        leads: (current.leads ?? []).map((lead) =>
-          lead.id === leadId ? { ...lead, note: `${lead.note} • Reviewed in the live CRM.` } : lead,
-        ),
-      };
-      fetch('/api/agent/dashboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(nextDashboard),
-      }).catch(() => undefined);
-      return nextDashboard;
+  const handleUpdateLeadStage = async (leadId: string, stage: NonNullable<AgentLead['stage']>, lossReason?: string) => {
+    const response = await fetch(`/api/agent/leads/${encodeURIComponent(leadId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...crmAuthHeaders() },
+      body: JSON.stringify({ stage, loss_reason: lossReason, actor_id: 'agent' }),
     });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error || 'Lead stage could not be updated.');
+    if (payload?.dashboard) setAgentDashboard(payload.dashboard);
+  };
+
+  const handleBulkAssign = async (leadIds: string[], assignedAgentId: string) => {
+    const response = await fetch('/api/agent/leads/bulk-assign', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...crmAuthHeaders() },
+      body: JSON.stringify({ lead_ids: leadIds, assigned_agent_id: assignedAgentId }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error || 'Assignment could not be saved.');
+    if (payload?.dashboard) setAgentDashboard(payload.dashboard);
+  };
+
+  const refreshAgentDashboard = async () => {
+    const response = await fetch('/api/agent/dashboard', { headers: crmAuthHeaders() });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error || 'CRM access could not be verified.');
+    setAgentDashboard(payload);
   };
 
   const handleReviewDeal = (dealId: number) => {
@@ -1273,7 +1651,7 @@ export default function FlxOsApp() {
       };
       fetch('/api/agent/dashboard', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...crmAuthHeaders() },
         body: JSON.stringify(nextDashboard),
       }).catch(() => undefined);
       return nextDashboard;
@@ -1323,17 +1701,15 @@ export default function FlxOsApp() {
     });
   };
 
-  const handleAddIncident = (title: string, summary: string, action: string) => {
-    fetch('/api/ops/incidents', {
+  const handleAddIncident = async (title: string, summary: string, action: string) => {
+    const response = await fetch('/api/ops/incidents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, summary, action }),
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((payload) => {
-        if (payload?.dashboard) setOpsDashboard(payload.dashboard);
-      })
-      .catch(() => undefined);
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.dashboard) throw new Error(payload?.error || 'Incident could not be saved.');
+    setOpsDashboard(payload.dashboard);
   };
 
   const handleAddMaintenance = (title: string, location: string, state: string) => {
@@ -1351,73 +1727,43 @@ export default function FlxOsApp() {
     });
   };
 
-  const handleAddQueueItem = (label: string, status: string, details: string) => {
-    setOpsDashboard((current) => {
-      const nextDashboard: OpsDashboard = {
-        ...current,
-        queue: [{ label, status, details }, ...(current.queue ?? [])],
-      };
-      fetch('/api/ops/dashboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(nextDashboard),
-      }).catch(() => undefined);
-      return nextDashboard;
-    });
+  const handleAddQueueItem = async (label: string, status: string, details: string) => {
+    const createdAt = new Date().toISOString();
+    const nextDashboard: OpsDashboard = {
+      ...opsDashboard,
+      queue: [{ label, status, details }, ...(opsDashboard.queue ?? [])],
+      auditTrail: [{ id: crypto.randomUUID(), action: 'Case created', target: label, at: createdAt }, ...(opsDashboard.auditTrail ?? [])],
+    };
+    const response = await fetch('/api/ops/dashboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nextDashboard) });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error || 'Verification case could not be saved.');
+    setOpsDashboard(payload?.dashboard ?? nextDashboard);
   };
 
-  const handleReviewQueueItem = (itemLabel: string) => {
-    setOpsDashboard((current) => {
-      const nextDashboard: OpsDashboard = {
-        ...current,
-        queue: (current.queue ?? []).map((item) =>
-          item.label === itemLabel ? { ...item, status: 'Verified', details: `${item.details} • Reviewed and approved.` } : item,
-        ),
-      };
-      fetch('/api/ops/dashboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(nextDashboard),
-      }).catch(() => undefined);
-      return nextDashboard;
-    });
+  const handleReviewQueueItem = async (itemLabel: string) => {
+    const reviewedAt = new Date().toISOString();
+    const nextDashboard: OpsDashboard = {
+      ...opsDashboard,
+      queue: (opsDashboard.queue ?? []).map((item) => item.label === itemLabel ? { ...item, status: 'Verified', details: `${item.details} • Reviewed and approved.` } : item),
+      auditTrail: [{ id: crypto.randomUUID(), action: 'Case approved', target: itemLabel, at: reviewedAt }, ...(opsDashboard.auditTrail ?? [])],
+    };
+    const response = await fetch('/api/ops/dashboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nextDashboard) });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error || 'Case approval could not be saved.');
+    setOpsDashboard(payload?.dashboard ?? nextDashboard);
   };
 
-  const handleResolveIncident = (incidentTitle: string) => {
-    setOpsDashboard((current) => {
-      const nextDashboard: OpsDashboard = {
-        ...current,
-        disputes: (current.disputes ?? []).filter((item) => item.title !== incidentTitle),
-        paymentSummary: {
-          balance: current.paymentSummary?.balance || 'TZS 142,500,000',
-          flags: 'Resolved • 100% reconciled',
-        },
-      };
-      fetch('/api/ops/dashboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(nextDashboard),
-      }).catch(() => undefined);
-      return nextDashboard;
-    });
-  };
-
-  const handleReleaseFunds = () => {
-    setOpsDashboard((current) => {
-      const nextDashboard: OpsDashboard = {
-        ...current,
-        paymentSummary: {
-          balance: 'TZS 145,200,000',
-          flags: 'Funds released • 100% reconciled',
-        },
-      };
-      fetch('/api/ops/dashboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(nextDashboard),
-      }).catch(() => undefined);
-      return nextDashboard;
-    });
+  const handleResolveIncident = async (incidentTitle: string) => {
+    const resolvedAt = new Date().toISOString();
+    const nextDashboard: OpsDashboard = {
+      ...opsDashboard,
+      disputes: (opsDashboard.disputes ?? []).map((item) => item.title === incidentTitle ? { ...item, status: 'Resolved', resolvedAt } : item),
+      auditTrail: [{ id: crypto.randomUUID(), action: 'Dispute resolved', target: incidentTitle, at: resolvedAt }, ...(opsDashboard.auditTrail ?? [])],
+    };
+    const response = await fetch('/api/ops/dashboard', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(nextDashboard) });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error || 'Dispute resolution could not be saved.');
+    setOpsDashboard(payload?.dashboard ?? nextDashboard);
   };
 
   const goToRole = (nextRole: Role) => {
@@ -1441,7 +1787,7 @@ export default function FlxOsApp() {
           <ExploreScreen listings={listings} onOpen={setSelectedListing} />
         ),
         Client: <ClientScreen onOpen={setSelectedListing} activeView={activeView.Client} dashboard={clientDashboard} onAddTicket={handleAddTicket} onQuickAction={handleClientQuickAction} />,
-        Agent: <AgentScreen activeView={activeView.Agent} dashboard={agentDashboard} onAddLead={handleAddLead} onReviewLead={handleReviewLead} onReviewDeal={handleReviewDeal} />,
+        Agent: <AgentScreen activeView={activeView.Agent} dashboard={agentDashboard} onAddLead={handleAddLead} onUpdateLeadStage={handleUpdateLeadStage} onBulkAssign={handleBulkAssign} onReviewDeal={handleReviewDeal} onAuthenticate={refreshAgentDashboard} />,
         Owner: (
           <OwnerScreen
             activeView={activeView.Owner}
@@ -1454,7 +1800,7 @@ export default function FlxOsApp() {
             onAddMaintenance={handleAddMaintenance}
           />
         ),
-        Ops: <OpsScreen activeView={activeView.Ops} dashboard={opsDashboard} onAddIncident={handleAddIncident} onResolveIncident={handleResolveIncident} onReleaseFunds={handleReleaseFunds} onAddQueueItem={handleAddQueueItem} onReviewQueueItem={handleReviewQueueItem} />,
+        Ops: <OpsScreen activeView={activeView.Ops} dashboard={opsDashboard} onAddIncident={handleAddIncident} onResolveIncident={handleResolveIncident} onAddQueueItem={handleAddQueueItem} onReviewQueueItem={handleReviewQueueItem} onDashboardUpdate={setOpsDashboard} />,
       })[role],
     [activeView, clientDashboard, agentDashboard, ownerDashboard, opsDashboard, listings, role],
   );

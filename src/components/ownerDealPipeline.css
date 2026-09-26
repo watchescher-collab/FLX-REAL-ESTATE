@@ -5,8 +5,105 @@
   overflow-y: auto;
 }
 
+@media (min-width: 761px) and (max-width: 1300px) {
+  .owner-reference-page .owner-reference-sidebar {
+    width: 76px;
+    align-items: center;
+    padding: 0 8px 12px;
+  }
+
+  .owner-reference-page .owner-reference-logo {
+    width: 100%;
+    align-items: center;
+    padding: 0;
+  }
+
+  .owner-reference-page .owner-reference-logo-full,
+  .owner-reference-page .owner-reference-logo small {
+    display: none;
+  }
+
+  .owner-reference-page .owner-reference-sidebar .owner-reference-logo-mark {
+    display: block;
+    color: var(--owner-red);
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .owner-reference-page .owner-reference-logo small,
+  .owner-reference-page .owner-reference-nav-label,
+  .owner-reference-page .owner-reference-portfolio > span,
+  .owner-reference-page .owner-reference-portfolio > svg,
+  .owner-reference-page .owner-reference-sidebar nav button > span,
+  .owner-reference-page .owner-reference-node b,
+  .owner-reference-page .owner-reference-node small {
+    display: none;
+  }
+
+  .owner-reference-page .owner-reference-portfolio {
+    display: flex;
+    width: 44px;
+    height: 44px;
+    justify-content: center;
+    margin: 0 auto 12px;
+    padding: 0;
+  }
+
+  .owner-reference-page .owner-reference-sidebar nav {
+    width: 100%;
+    align-items: center;
+  }
+
+  .owner-reference-page .owner-reference-sidebar nav button {
+    width: 44px;
+    height: 44px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .owner-reference-page .owner-reference-sidebar nav button svg {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+  }
+
+  .owner-reference-page .owner-reference-node {
+    width: 44px;
+    height: 44px;
+    justify-content: center;
+    margin: auto 0 0;
+    padding: 0;
+  }
+
+  .owner-reference-page .owner-reference-node > span {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    font-size: 0;
+  }
+
+  .owner-reference-page .owner-reference-node > span i {
+    width: 7px;
+    height: 7px;
+    margin: 0;
+  }
+
+  .owner-reference-page .owner-reference-shell {
+    padding-left: 76px;
+  }
+
+  .owner-reference-workspace {
+    inset: 0 0 0 76px;
+  }
+}
+
 .owner-reference-page {
   font-size: 20px;
+}
+
+.owner-reference-page .owner-reference-logo-mark {
+  display: none;
 }
 
 .owner-reference-page .owner-reference-logo small,

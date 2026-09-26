@@ -47,28 +47,17 @@ export function LegalEscrowConsolePage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [mobileNav, setMobileNav] = useState(false);
-  const [liveStatus, setLiveStatus] = useState('BOT Vault Connected');
+  const [liveStatus, setLiveStatus] = useState('Payment connector not configured');
 
   useEffect(() => {
-    Promise.all([fetch('/api/health'), fetch('/api/agent/dashboard')]).then(async ([healthResponse, dealResponse]) => {
-      if (!healthResponse.ok || !dealResponse.ok) throw new Error('Legal data unavailable');
-      const health = await healthResponse.json();
-      setLiveStatus(health.database === 'postgres' ? 'BOT Vault Connected' : 'Local Vault Connected');
-    }).catch(() => setNotice({ tone: 'error', message: 'Live legal bridge unavailable. Review mode is still available.' }));
+    fetch('/api/health').then((response) => {
+      if (!response.ok) throw new Error('API unavailable');
+      setLiveStatus('Payment connector not configured');
+    }).catch(() => setLiveStatus('Backend unavailable'));
   }, []);
 
   const executeDeal = async () => {
-    if (!agreed || !signed) {
-      setNotice({ tone: 'error', message: 'Apply your NIDA signature and accept the agreement first.' });
-      return;
-    }
-    setBusy(true);
-    try {
-      const response = await fetch('/api/legal/actions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ transactionId: 'FLX-8829-DAR', action: 'sign_and_fund_escrow', rail, phone }) });
-      if (!response.ok) throw new Error('Escrow action failed');
-      setNotice({ tone: 'success', message: `STK prompt sent to +255 ${phone} via ${rail}.` });
-      setLiveStatus('STK Prompt Sent');
-    } catch { setNotice({ tone: 'error', message: 'The escrow action could not be recorded.' }); } finally { setBusy(false); }
+    setNotice({ tone: 'error', message: 'Payment is unavailable. No payment connector is configured; no funds were requested or recorded.' });
   };
 
   const share = async () => { if (navigator.share) await navigator.share({ title: 'FLX Legal Deal Room #FLX-8829', url: window.location.href }); else await navigator.clipboard?.writeText(window.location.href); setNotice({ tone: 'success', message: 'Secure deal-room link copied.' }); };

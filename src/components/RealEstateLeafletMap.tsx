@@ -88,9 +88,16 @@ export const RealEstateLeafletMap: React.FC<RealEstateLeafletMapProps> = ({
         }),
       });
 
-      const popup = document.createElement('div');
+      const popup = document.createElement('button');
+      popup.type = 'button';
       popup.className = 'fx-leaflet-popup';
-      popup.innerHTML = `<strong>${property.title}</strong><span>${property.location.city}</span><b>${property.property_type === 'Invest' ? 'For sale' : 'For rent'}</b>`;
+      const title = document.createElement('strong');
+      title.textContent = property.title;
+      const city = document.createElement('span');
+      city.textContent = property.location.city;
+      const intent = document.createElement('b');
+      intent.textContent = property.property_type === 'Invest' ? 'For sale' : 'For rent';
+      popup.append(title, city, intent);
       popup.addEventListener('click', () => callbacksRef.current.onOpenDetails(property));
       marker.bindPopup(popup);
       marker.on('click', () => callbacksRef.current.onSelectProperty(property));

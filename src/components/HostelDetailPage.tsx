@@ -141,7 +141,7 @@ export function HostelDetailPage() {
         </div>
       </main>
 
-      <footer className="hostel-footer"><strong>FLX Real Estate - Pangisha, nunua, kaa from anywhere</strong><span>Secured transactions powered by Bank of Tanzania escrow protocols.</span><small>© 2025 FLX Realty Ltd. Dar es Salaam, Tanzania. All rights reserved.</small></footer>
+      <footer className="hostel-footer"><strong>FLX Real Estate</strong><span>Property information from the FLX field team.</span><small>Dar es Salaam, Tanzania.</small></footer>
       {showGallery && <div className="hostel-lightbox" role="dialog" aria-modal="true" onClick={() => setShowGallery(false)}><button type="button" aria-label="Close gallery" onClick={() => setShowGallery(false)}><X size={22} /></button><img src={galleryImages[0]} alt="Mlimani hostel gallery" /><span>Room 204 Main View</span></div>}
     </div>
   );
