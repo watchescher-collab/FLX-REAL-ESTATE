@@ -36,4 +36,6 @@
 .workspace-profile-dialog form > footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 3px; }
 .workspace-profile-dialog form > footer button { min-height: 38px; padding: 0 12px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #111; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
 .workspace-profile-dialog form > footer button[type="submit"], .workspace-profile-dialog form > footer button:last-child { border-color: #c4121a; background: #c4121a; color: #fff; }
+.protected-workspace-shell { min-height: 100vh; background: #f4f4f4; }
+.protected-workspace-shell > :not(.workspace-topbar):first-child { margin-top: 0; }
 @media (max-width: 600px) { .workspace-topbar-inner { width: calc(100% - 20px); gap: 9px; }.workspace-topbar-brand span { display: none; }.workspace-topbar-location { padding: 7px; font-size: 10px; }.workspace-topbar-section { font-size: 10px; }.workspace-profile-backdrop { padding: 10px; }.workspace-profile-dialog { max-height: calc(100dvh - 20px); } }

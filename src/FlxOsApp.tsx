@@ -3,14 +3,8 @@ import type { ChangeEvent, KeyboardEvent, ReactElement } from "react";
 import { RealEstateLeafletMap } from "./components/RealEstateLeafletMap";
 import { HostelDetailPage } from "./components/HostelDetailPage";
 import { MarketplaceClientFlow } from "./components/MarketplaceClientFlow";
-import { PropertyManagementPage } from "./components/PropertyManagementPage";
-import { InvestorWorkspacePage } from "./components/InvestorWorkspacePage";
 import { LocalAuthModal } from "./components/LocalAuthModal";
 import { WorkspaceAccountMenu, WorkspaceTopBar } from "./components/WorkspaceChrome";
-import { AdminAccountsPage } from "./components/AdminAccountsPage";
-import { LegalEscrowConsolePage } from "./components/LegalEscrowConsolePage";
-import { CadastralDiligencePage } from "./components/CadastralDiligencePage";
-import { OwnerDashboardReferencePage } from "./components/OwnerDashboardReferencePage";
 import "./components/workspaceAccess.css";
 import "./components/opsControl.css";
 import { getStoredToken, signIn as signInApi, signOut as signOutApi } from "./auth";
@@ -1473,32 +1467,8 @@ export default function FlxOsApp() {
   const location = useLocation();
   const pathname = location.pathname;
 
-  if (pathname === '/admin' || pathname === '/admin/dashboard' || pathname === '/admin/accounts') {
-    return <AdminAccountsPage />;
-  }
-
-  if (pathname === '/investor/opportunities') {
-    return <InvestorWorkspacePage />;
-  }
-
   if (pathname === '/hostel/milimani') {
     return <HostelDetailPage />;
-  }
-
-  if (pathname === '/owner' || pathname === '/owner/dashboard' || pathname === '/owner/portfolio') {
-    return <OwnerDashboardReferencePage />;
-  }
-
-  if (pathname === '/properties/manage') {
-    return <PropertyManagementPage />;
-  }
-
-  if (pathname === '/legal' || pathname === '/legal/escrow' || pathname === '/legal/status') {
-    return <LegalEscrowConsolePage />;
-  }
-
-  if (pathname === '/cadastral' || pathname === '/land/gezaulole') {
-    return <CadastralDiligencePage />;
   }
 
   if (pathname === '/' || pathname === '/marketplace') {
@@ -1517,19 +1487,15 @@ export default function FlxOsApp() {
 function WorkspaceRoleRoute({ requiredRole }: { requiredRole?: 'Agent' | 'Owner' }) {
   const { user, isLoading, openAuthModal } = useAuth();
 
+  useEffect(() => {
+    if (!isLoading && requiredRole && user?.role !== requiredRole) {
+      openAuthModal();
+    }
+  }, [isLoading, requiredRole, user?.role, openAuthModal]);
+
   if (isLoading) return <main className="workspace-access-page"><p>Checking your FLX account…</p></main>;
   if (requiredRole && user?.role !== requiredRole) {
-    return <main className="workspace-access-page">
-      <section>
-        <img src="/assets/flx-logo-round.jpeg" alt="FLX Real Estate" />
-        <span>FLX WORKSPACE ACCESS</span>
-        <h1>{user ? `${requiredRole} account required` : `Sign in to your ${requiredRole.toLowerCase()} workspace`}</h1>
-        <p>{user ? 'This account does not have access to this workspace.' : 'Use the approved account for this workspace to continue.'}</p>
-        <button type="button" onClick={openAuthModal}>{user ? 'Switch account' : 'Sign in'}</button>
-        <a href="/marketplace">Back to FLX marketplace</a>
-      </section>
-      <LocalAuthModal />
-    </main>;
+    return <LocalAuthModal />;
   }
 
   return <WorkspaceDashboard />;

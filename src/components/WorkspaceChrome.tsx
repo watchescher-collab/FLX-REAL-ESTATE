@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, LogIn, LogOut, MapPin, Pencil, UserRound, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -111,4 +111,16 @@ export function WorkspaceTopBar({ section = 'Workspace', location = 'Dar es Sala
       <WorkspaceAccountMenu />
     </div>
   </header>;
+}
+
+export function ProtectedWorkspaceShell({
+  section,
+  location,
+  backHref,
+  children,
+}: WorkspaceChromeProps & { children: ReactNode }) {
+  return <div className="protected-workspace-shell">
+    <WorkspaceTopBar section={section} location={location} backHref={backHref} />
+    {children}
+  </div>;
 }

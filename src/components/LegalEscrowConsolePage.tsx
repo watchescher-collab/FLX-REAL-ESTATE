@@ -25,6 +25,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { ProtectedWorkspaceShell } from './WorkspaceChrome';
 
 type Language = 'sw' | 'en';
 type Rail = 'M-Pesa' | 'Tigo Pesa' | 'Airtel Money' | 'CRDB / NMB';
@@ -117,146 +118,147 @@ export function LegalEscrowConsolePage() {
   };
 
   return (
-    <div className="legal-reference-page">
-      <aside className={`legal-reference-sidebar ${mobileNav ? 'is-open' : ''}`}>
-        <div>
-          <div className="legal-reference-brand">
-            <span>FLX Legal Console</span>
+    <ProtectedWorkspaceShell section="Legal escrow" location="Dar es Salaam" backHref="/marketplace">
+      <div className="legal-reference-page">
+        <aside className={`legal-reference-sidebar ${mobileNav ? 'is-open' : ''}`}>
+          <div>
+            <div className="legal-reference-brand">
+              <span>FLX Legal Console</span>
+            </div>
+            <nav>
+              {[
+                ['Legal Deal Room', Gavel],
+                ['Escrow Vault', Landmark],
+                ['Smart Contracts', History],
+                ['Conveyancing Tracker', ShieldCheck],
+                ['Cadastral Registry', Map],
+                ['Active Deals', FileCheck2],
+              ].map(([label, Icon]) => (
+                <button
+                  key={String(label)}
+                  type="button"
+                  className={label === 'Escrow Vault' ? 'is-active' : ''}
+                  onClick={() => setNotice({ tone: 'success', message: `${String(label)} selected.` })}
+                >
+                  <Icon size={17} />
+                  {label}
+                </button>
+              ))}
+            </nav>
           </div>
-          <nav>
-            {[
-              ['Legal Deal Room', Gavel],
-              ['Escrow Vault', Landmark],
-              ['Smart Contracts', History],
-              ['Conveyancing Tracker', ShieldCheck],
-              ['Cadastral Registry', Map],
-              ['Active Deals', FileCheck2],
-            ].map(([label, Icon]) => (
-              <button
-                key={String(label)}
-                type="button"
-                className={label === 'Escrow Vault' ? 'is-active' : ''}
-                onClick={() => setNotice({ tone: 'success', message: `${String(label)} selected.` })}
-              >
-                <Icon size={17} />
-                {label}
-              </button>
-            ))}
-          </nav>
-        </div>
 
-        <div>
-          <div className="legal-reference-bridge">
-            <b>
-              BOT ESCROW BRIDGE <i />
-            </b>
-            <p>Multi-sig authorized with Bank of Tanzania regulatory clearing nodes.</p>
-          </div>
-          <div className="legal-reference-user">
-            <span>JK</span>
-            <div>
-              <b>Adv. Juma Khalfan</b>
-              <small>High Court Registrar</small>
+          <div>
+            <div className="legal-reference-bridge">
+              <b>
+                BOT ESCROW BRIDGE <i />
+              </b>
+              <p>Multi-sig authorized with Bank of Tanzania regulatory clearing nodes.</p>
+            </div>
+            <div className="legal-reference-user">
+              <span>JK</span>
+              <div>
+                <b>Adv. Juma Khalfan</b>
+                <small>High Court Registrar</small>
+              </div>
             </div>
           </div>
-        </div>
-      </aside>
+        </aside>
 
-      <div className="legal-reference-shell">
-        <header className="legal-reference-header">
-          <button className="legal-reference-menu" type="button" onClick={() => setMobileNav((open) => !open)}>
-            {mobileNav ? <X size={20} /> : <Menu size={20} />}
-          </button>
-          <div className="legal-reference-search">
-            <Search size={17} />
-            <input placeholder="Search deed number, party TIN, or plot..." aria-label="Search legal documents" />
-          </div>
-          <div className="legal-reference-tools">
-            <span>🔒 {liveStatus}</span>
-            <button type="button">TZS</button>
-            <button type="button">USD</button>
-            <button type="button" onClick={() => setLanguage('en')}>EN</button>
-            <button type="button" onClick={() => setLanguage('sw')}>SW</button>
-            <button type="button" aria-label="Notifications">
-              <Bell size={16} />
+        <div className="legal-reference-shell">
+          <header className="legal-reference-header">
+            <button className="legal-reference-menu" type="button" onClick={() => setMobileNav((open) => !open)}>
+              {mobileNav ? <X size={20} /> : <Menu size={20} />}
             </button>
-            <span className="legal-reference-avatar">JK</span>
-          </div>
-        </header>
-
-        <main className="legal-reference-main">
-          <div className="legal-reference-breadcrumb">
-            <a href="/">⌂ Home</a>
-            <ChevronRight size={13} />
-            <a href="#rooms">Escrow Deal Rooms</a>
-            <ChevronRight size={13} />
-            <strong>Transaction #FLX-8829</strong>
-            <ChevronRight size={13} />
-            <span>Mlimani Comfort Hostel</span>
-            <div>
-              <b>BOT Directive 2024 / Sec. 14A</b>
-              <b>NIDA Live Bridge</b>
+            <div className="legal-reference-search">
+              <Search size={17} />
+              <input placeholder="Search deed number, party TIN, or plot..." aria-label="Search legal documents" />
             </div>
-          </div>
+            <div className="legal-reference-tools">
+              <span>🔒 {liveStatus}</span>
+              <button type="button">TZS</button>
+              <button type="button">USD</button>
+              <button type="button" onClick={() => setLanguage('en')}>EN</button>
+              <button type="button" onClick={() => setLanguage('sw')}>SW</button>
+              <button type="button" aria-label="Notifications">
+                <Bell size={16} />
+              </button>
+              <span className="legal-reference-avatar">JK</span>
+            </div>
+          </header>
 
-          <div className="legal-reference-identity">
-            <div className="legal-reference-identity-copy">
-              <div className="legal-reference-tag-row">
-                <span className="legal-reference-live-pill">LIVE DEAL ROOM</span>
-                <span className="legal-reference-code">TXN: #FLX-8829-DAR</span>
-                <span className="legal-reference-zone">UDSM Sub-Zone Kinondoni</span>
+          <main className="legal-reference-main">
+            <div className="legal-reference-breadcrumb">
+              <a href="/">⌂ Home</a>
+              <ChevronRight size={13} />
+              <a href="#rooms">Escrow Deal Rooms</a>
+              <ChevronRight size={13} />
+              <strong>Transaction #FLX-8829</strong>
+              <ChevronRight size={13} />
+              <span>Mlimani Comfort Hostel</span>
+              <div>
+                <b>BOT Directive 2024 / Sec. 14A</b>
+                <b>NIDA Live Bridge</b>
               </div>
-              <h1>Mlimani Comfort Hostel — Bed 204-B</h1>
-              <p>
-                <Map size={16} /> Plot #492, Block C, Sinza Kijiweni, Dar es Salaam (12 min walk to UDSM Main Campus Gate)
-              </p>
             </div>
 
-            <div className="legal-reference-actions">
-              <button type="button" onClick={share}>
-                <Printer size={16} /> Legal Dossier (PDF)
-              </button>
-              <button type="button" onClick={share}>
-                <Share2 size={16} /> Share Link
-              </button>
-              <button type="button" className="is-secondary">
-                <Download size={16} /> Draft Mkataba
-              </button>
-            </div>
-          </div>
-
-          <div className="legal-reference-stepper">
-            {[
-              { label: 'Step 1 • Completed', title: 'Reservation Deposit', meta: 'TZS 50,000 (M-Pesa)', tone: 'done', icon: Check },
-              { label: 'Step 2 • Active Stage', title: 'Bilingual Mkataba', meta: 'Awaiting tenant e-signature', tone: 'active', icon: Fingerprint },
-              { label: 'Step 3 • Queued', title: 'BOT Escrow Lock', meta: 'TZS 330,000 • CRDB Trustee', tone: 'queued', icon: WalletCards },
-              { label: 'Step 4 • Final', title: 'Geofenced Smart Pass', meta: 'Sinza Gate Checkpoint', tone: 'final', icon: QrCode },
-            ].map((step) => (
-              <div key={step.label} className={`legal-reference-step is-${step.tone}`}>
-                <span className="legal-reference-step-icon">
-                  <step.icon size={18} />
-                </span>
-                <div>
-                  <strong>{step.label}</strong>
-                  <h3>{step.title}</h3>
-                  <small>{step.meta}</small>
+            <div className="legal-reference-identity">
+              <div className="legal-reference-identity-copy">
+                <div className="legal-reference-tag-row">
+                  <span className="legal-reference-live-pill">LIVE DEAL ROOM</span>
+                  <span className="legal-reference-code">TXN: #FLX-8829-DAR</span>
+                  <span className="legal-reference-zone">UDSM Sub-Zone Kinondoni</span>
                 </div>
+                <h1>Mlimani Comfort Hostel — Bed 204-B</h1>
+                <p>
+                  <Map size={16} /> Plot #492, Block C, Sinza Kijiweni, Dar es Salaam (12 min walk to UDSM Main Campus Gate)
+                </p>
               </div>
-            ))}
-          </div>
 
-          {notice && <div className={`legal-reference-notice is-${notice.tone}`}>{notice.message}</div>}
+              <div className="legal-reference-actions">
+                <button type="button" onClick={share}>
+                  <Printer size={16} /> Legal Dossier (PDF)
+                </button>
+                <button type="button" onClick={share}>
+                  <Share2 size={16} /> Share Link
+                </button>
+                <button type="button" className="is-secondary">
+                  <Download size={16} /> Draft Mkataba
+                </button>
+              </div>
+            </div>
 
-          <div className="legal-reference-grid">
-            <div className="legal-reference-left">
-              <section className="legal-reference-panel">
-                <div className="legal-reference-panel-title">
+            <div className="legal-reference-stepper">
+              {[
+                { label: 'Step 1 • Completed', title: 'Reservation Deposit', meta: 'TZS 50,000 (M-Pesa)', tone: 'done', icon: Check },
+                { label: 'Step 2 • Active Stage', title: 'Bilingual Mkataba', meta: 'Awaiting tenant e-signature', tone: 'active', icon: Fingerprint },
+                { label: 'Step 3 • Queued', title: 'BOT Escrow Lock', meta: 'TZS 330,000 • CRDB Trustee', tone: 'queued', icon: WalletCards },
+                { label: 'Step 4 • Final', title: 'Geofenced Smart Pass', meta: 'Sinza Gate Checkpoint', tone: 'final', icon: QrCode },
+              ].map((step) => (
+                <div key={step.label} className={`legal-reference-step is-${step.tone}`}>
+                  <span className="legal-reference-step-icon">
+                    <step.icon size={18} />
+                  </span>
                   <div>
-                    <ShieldCheck size={18} />
-                    <h2>Verified Counterparties &amp; Legal Title Verification</h2>
+                    <strong>{step.label}</strong>
+                    <h3>{step.title}</h3>
+                    <small>{step.meta}</small>
                   </div>
-                  <span>NIDA e-KYC Matched</span>
                 </div>
+              ))}
+            </div>
+
+            {notice && <div className={`legal-reference-notice is-${notice.tone}`}>{notice.message}</div>}
+
+            <div className="legal-reference-grid">
+              <div className="legal-reference-left">
+                <section className="legal-reference-panel">
+                  <div className="legal-reference-panel-title">
+                    <div>
+                      <ShieldCheck size={18} />
+                      <h2>Verified Counterparties &amp; Legal Title Verification</h2>
+                    </div>
+                    <span>NIDA e-KYC Matched</span>
+                  </div>
 
                 <div className="legal-reference-counterparties">
                   <article className="legal-reference-counterparty">
@@ -478,8 +480,9 @@ export function LegalEscrowConsolePage() {
               </section>
             </div>
           </div>
-        </main>
+          </main>
+        </div>
       </div>
-    </div>
+    </ProtectedWorkspaceShell>
   );
 }

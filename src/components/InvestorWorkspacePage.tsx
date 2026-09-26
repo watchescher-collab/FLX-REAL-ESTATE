@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpRight, TrendingUp } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { WorkspaceTopBar } from './WorkspaceChrome';
+import { ProtectedWorkspaceShell } from './WorkspaceChrome';
 import './investorWorkspace.css';
 
 type Opportunity = {
@@ -55,15 +55,10 @@ export function InvestorWorkspacePage() {
     return () => { isCurrent = false; };
   }, [user?.role]);
 
-  if (isLoading) return <main className="investor-workspace-page"><p className="investor-workspace-state">Checking your FLX account…</p></main>;
-  if (user?.role !== 'Investor') return <main className="investor-workspace-page">
-    <WorkspaceTopBar section="Investor workspace" />
-    <section className="investor-workspace-access"><TrendingUp size={27} /><h1>Investor access required</h1><p>Sign in with an approved FLX Investor account to view investment opportunities.</p><button type="button" onClick={user ? signOut : openAuthModal}>{user ? 'Sign out' : 'Investor sign in'}</button></section>
-  </main>;
+  if (isLoading) return <ProtectedWorkspaceShell section="Investor workspace" location="Dar es Salaam" backHref="/marketplace"><main className="investor-workspace-page"><p className="investor-workspace-state">Checking your FLX account…</p></main></ProtectedWorkspaceShell>;
+  if (user?.role !== 'Investor') return <ProtectedWorkspaceShell section="Investor workspace" location="Dar es Salaam" backHref="/marketplace"><main className="investor-workspace-page"><section className="investor-workspace-access"><TrendingUp size={27} /><h1>Investor access required</h1><p>Sign in with an approved FLX Investor account to view investment opportunities.</p><button type="button" onClick={user ? signOut : openAuthModal}>{user ? 'Sign out' : 'Investor sign in'}</button></section></main></ProtectedWorkspaceShell>;
 
-  return <main className="investor-workspace-page">
-    <WorkspaceTopBar section="Investor workspace" />
-    <section className="investor-workspace-main">
+  return <ProtectedWorkspaceShell section="Investor workspace" location="Dar es Salaam" backHref="/marketplace"><main className="investor-workspace-page"><section className="investor-workspace-main">
       <div className="investor-workspace-heading"><div><span>INVESTOR DESK</span><h1>Investment opportunities</h1><p>Approved land, commercial, and sale listings from the FLX marketplace.</p></div><strong><TrendingUp size={17} /> {opportunities.length} opportunities</strong></div>
       {error && <p className="investor-workspace-error" role="alert">{error}</p>}
       {isLoadingInventory ? <p className="investor-workspace-state">Loading approved opportunities…</p> : opportunities.length ? <div className="investor-opportunity-grid">
@@ -72,6 +67,5 @@ export function InvestorWorkspacePage() {
           <div className="investor-opportunity-body"><div className="investor-opportunity-meta"><span>{opportunity.kind}</span><span>{opportunity.city}</span></div><h2>{opportunity.title}</h2><p>{opportunity.description || 'Contact FLX to review the available listing details.'}</p><div className="investor-opportunity-footer"><strong>{opportunity.price}</strong><span>{opportunity.period}</span></div></div>
         </article>)}
       </div> : <section className="investor-workspace-empty"><TrendingUp size={25} /><h2>No approved opportunities yet</h2><p>New investment listings will appear here after they are approved for publication.</p><a href="/#properties">Browse all properties <ArrowUpRight size={15} /></a></section>}
-    </section>
-  </main>;
+    </section></main></ProtectedWorkspaceShell>;
 }

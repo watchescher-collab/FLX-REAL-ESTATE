@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Building2, Check, Clock3, LogOut, RefreshCw, ShieldCheck, Users, X } from 'lucide-react';
+import { Building2, Check, Clock3, RefreshCw, ShieldCheck, Users, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getStoredToken } from '../auth';
-import { WorkspaceTopBar } from './WorkspaceChrome';
+import { LocalAuthModal } from './LocalAuthModal';
+import { ProtectedWorkspaceShell } from './WorkspaceChrome';
 import './adminAccounts.css';
 
 type AccountRecord = {
@@ -135,18 +136,15 @@ export function AdminAccountsPage() {
 
   if (authLoading) return <main className="admin-accounts-page"><p>Checking administrator access…</p></main>;
 
-  if (user?.role !== 'Admin') return <main className="admin-accounts-page">
-    <WorkspaceTopBar section="Administration" />
-    <section className="admin-access-panel">
-      <ShieldCheck size={28} />
-      <h1>{user ? 'Administrator access required' : 'Sign in to FLX administration'}</h1>
-      <p>{user ? 'This account does not have permission to review accounts or listings.' : 'Use your FLX administrator account to manage applications, account activity, and listing approvals.'}</p>
-      {user ? <button type="button" onClick={signOut}>Sign out</button> : <button type="button" onClick={openAuthModal}>Administrator sign in</button>}
-    </section>
-  </main>;
+  useEffect(() => {
+    if (user?.role !== 'Admin') {
+      openAuthModal();
+    }
+  }, [user?.role, openAuthModal]);
 
-  return <main className="admin-accounts-page">
-    <WorkspaceTopBar section="Administration" />
+  if (user?.role !== 'Admin') return <><LocalAuthModal />{user && <button type="button" className="admin-access-signout" onClick={signOut}>Sign out</button>}</>;
+
+  return <ProtectedWorkspaceShell section="Administration" location="Dar es Salaam" backHref="/marketplace"><main className="admin-accounts-page">
     <div className="admin-accounts-main">
       <div className="admin-accounts-title"><div><span>ADMINISTRATION</span><h1>Account & approval center</h1></div><button type="button" onClick={() => void refresh()} aria-label="Refresh records"><RefreshCw size={16} /></button></div>
       <section className="admin-accounts-stats" aria-label="Account overview">
@@ -199,5 +197,5 @@ export function AdminAccountsPage() {
         </article>) : <p className="admin-accounts-empty">No sign-in or sign-up events recorded yet.</p>}</div>
       </section>}
     </div>
-  </main>;
+  </main></ProtectedWorkspaceShell>;
 }

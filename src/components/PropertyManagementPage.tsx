@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { ArrowLeft, Check, CircleAlert, Clock3, FileImage, Plus, Save, Trash2, Video, X } from 'lucide-react';
 import { fetchSessionUser, getStoredToken, registerUser, signIn, signOut } from '../auth';
 import type { SessionUser } from '../auth';
+import { ProtectedWorkspaceShell } from './WorkspaceChrome';
 import './marketAccount.css';
 
 type PropertyKind = 'Hostel' | 'Apartment' | 'Frame' | 'House' | 'Land' | 'Commercial' | 'Other';
@@ -279,10 +280,9 @@ export function PropertyManagementPage() {
     }
   };
 
-  if (isCheckingSession) return <main className="property-workbench-page"><p className="property-workbench-state">Checking your session…</p></main>;
+  if (isCheckingSession) return <ProtectedWorkspaceShell section="Property workbench" location="Dar es Salaam" backHref="/marketplace"><main className="property-workbench-page"><p className="property-workbench-state">Checking your session…</p></main></ProtectedWorkspaceShell>;
 
-  if (!session) return <main className="property-workbench-page">
-    <header className="property-workbench-header"><a href="/">FLX Real Estate</a><a href="/">Back to marketplace</a></header>
+  if (!session) return <ProtectedWorkspaceShell section="Property workbench" location="Dar es Salaam" backHref="/marketplace"><main className="property-workbench-page">
     <section className="property-workbench-auth"><span>PROPERTY MANAGEMENT</span><h1>{authMode === 'signIn' ? 'Sign in to manage property records' : 'Create an Owner account'}</h1><p>Owners can manage their listings. Agents and Admins sign in with their assigned accounts.</p>
       <form onSubmit={submitAuthentication}>
         {authMode === 'register' && <label>Full name<input value={authForm.name} onChange={(event) => setAuthForm((current) => ({ ...current, name: event.target.value }))} autoComplete="name" required /></label>}
@@ -293,10 +293,9 @@ export function PropertyManagementPage() {
       </form>
       <button type="button" className="property-workbench-text-button" onClick={() => { setAuthMode((mode) => mode === 'signIn' ? 'register' : 'signIn'); setAuthError(''); }}>{authMode === 'signIn' ? 'New property owner? Create an account' : 'Already registered? Sign in'}</button>
     </section>
-  </main>;
+  </main></ProtectedWorkspaceShell>;
 
-  return <main className="property-workbench-page">
-    <header className="property-workbench-header"><a href="/">FLX Real Estate</a><div><span>{session.name}</span><b>{session.role}</b><button type="button" onClick={() => { signOut(); setSession(null); }}>Sign out</button></div></header>
+  return <ProtectedWorkspaceShell section="Property workbench" location="Dar es Salaam" backHref="/marketplace"><main className="property-workbench-page">
     <div className="property-workbench-content">
       <div className="property-workbench-title"><div><span>PROPERTY WORKBENCH</span><h1>Property records</h1><p>Every change is saved to the shared property record. Edits return listings to Admin review.</p></div><button type="button" onClick={() => beginEdit()}><Plus size={16} /> Add property</button></div>
       {error && <p className="property-workbench-error" role="alert"><CircleAlert size={16} /> {error}</p>}
@@ -354,5 +353,5 @@ export function PropertyManagementPage() {
         <footer><button type="button" className="is-cancel" onClick={() => setEditor(null)}>Cancel</button><button type="submit" disabled={isSaving}>{isSaving ? 'Saving…' : <><Save size={15} /> Save pending review</>}</button></footer>
       </form>
     </section></div>}
-  </main>;
+  </main></ProtectedWorkspaceShell>;
 }
