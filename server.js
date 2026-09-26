@@ -2436,15 +2436,15 @@ export const createApp = () => {
       const duplicateClauses = [];
       const duplicateParams = [];
       if (normalizedEmail) {
-        duplicateClauses.push('LOWER(COALESCE(email, \''\')) = ?');
+        duplicateClauses.push("LOWER(COALESCE(email, '')) = ?");
         duplicateParams.push(normalizedEmail);
       }
       if (cleanPhone) {
-        duplicateClauses.push('LOWER(COALESCE(phone, \''\')) = ?');
+        duplicateClauses.push("LOWER(COALESCE(phone, '')) = ?");
         duplicateParams.push(cleanPhone.replace(/\s+/g, '').toLowerCase());
       }
       if (usernameValue) {
-        duplicateClauses.push('LOWER(COALESCE(username, \''\')) = ?');
+        duplicateClauses.push("LOWER(COALESCE(username, '')) = ?");
         duplicateParams.push(usernameValue.toLowerCase());
       }
       existing = duplicateClauses.length
