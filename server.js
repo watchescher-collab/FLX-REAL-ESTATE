@@ -87,6 +87,7 @@ const provisionPostgresAdmin = async (client) => {
 const ensureUserWorkflowColumns = () => {
   const columns = new Set(db.prepare('PRAGMA table_info(users)').all().map((column) => column.name));
   const migrations = [
+    ['username', "TEXT NOT NULL DEFAULT ''"],
     ['phone', "TEXT NOT NULL DEFAULT ''"],
     ['profile_picture', "TEXT NOT NULL DEFAULT ''"],
     ['is_demo', 'INTEGER NOT NULL DEFAULT 0'],
@@ -114,6 +115,7 @@ const postgresSchema = `
   CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
+    username VARCHAR(80) NOT NULL DEFAULT '',
     email VARCHAR(255) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     role VARCHAR(50) NOT NULL DEFAULT 'Client',
@@ -358,20 +360,30 @@ const ensurePostgresSeedData = async () => {
 
   await provisionPostgresAdmin(client);
   const demoAccounts = [
+    ['FLX Administrator', 'admin@flx.local', 'admin123', 'Admin', '+255700000000', ''],
     ['Demo Client', 'client@flx.local', 'client123', 'Client', '+255700000001', 'University scholar (hostel)'],
     ['Demo Agent', 'agent@flx.local', 'agent123', 'Agent', '+255700000002', ''],
     ['Demo Owner', 'owner@flx.local', 'owner123', 'Owner', '+255700000003', ''],
     ['Demo Investor', 'investor@flx.local', 'investor123', 'Investor', '+255700000004', ''],
   ];
   const demoSeedMarker = await client.query("SELECT 1 FROM app_data WHERE key_name='demoAccountsSeeded'");
+  for (const [name, email, password, role, phone, clientCategory] of demoAccounts) {
+    await client.query(`
+      INSERT INTO users (name,email,password,role,phone,client_category,approval_status,approved_at,is_demo)
+      VALUES ($1,$2,$3,$4,$5,$6,'Approved',NOW(),TRUE)
+      ON CONFLICT (email) DO UPDATE SET
+        name = EXCLUDED.name,
+        email = EXCLUDED.email,
+        password = EXCLUDED.password,
+        role = EXCLUDED.role,
+        phone = EXCLUDED.phone,
+        client_category = EXCLUDED.client_category,
+        approval_status = 'Approved',
+        approved_at = COALESCE(users.approved_at, NOW()),
+        is_demo = TRUE
+    `, [name, email, await hashPassword(password), role, phone, clientCategory]);
+  }
   if (!demoSeedMarker.rows.length) {
-    for (const [name, email, password, role, phone, clientCategory] of demoAccounts) {
-      await client.query(`
-        INSERT INTO users (name,email,password,role,phone,client_category,approval_status,approved_at,is_demo)
-        VALUES ($1,$2,$3,$4,$5,$6,'Approved',NOW(),TRUE)
-        ON CONFLICT(email) DO UPDATE SET is_demo=TRUE
-      `, [name, email, await hashPassword(password), role, phone, clientCategory]);
-    }
     await client.query("INSERT INTO app_data (key_name,key_value) VALUES ('demoAccountsSeeded','true') ON CONFLICT(key_name) DO NOTHING");
   }
   const legacyUsers = await client.query("SELECT id, password FROM users WHERE password NOT LIKE 'scrypt$%'");
@@ -987,25 +999,35 @@ const createTables = () => {
     })));
   }
 
+  const demoUsers = [
+    ['FLX Administrator', 'admin@flx.local', 'admin123', 'Admin', '+255700000000', ''],
+    ['Demo Client', 'client@flx.local', 'client123', 'Client', '+255700000001', 'University scholar (hostel)'],
+    ['Demo Agent', 'agent@flx.local', 'agent123', 'Agent', '+255700000002', ''],
+    ['Demo Owner', 'owner@flx.local', 'owner123', 'Owner', '+255700000003', ''],
+    ['Demo Investor', 'investor@flx.local', 'investor123', 'Investor', '+255700000004', ''],
+  ];
   const demoSeedMarker = db.prepare("SELECT 1 FROM app_data WHERE key_name='demoAccountsSeeded'").get();
+  const upsertDemoUser = db.prepare(`
+    INSERT INTO users (name, email, password, role, phone, client_category, approval_status, approved_at, is_demo)
+    VALUES (@name, @email, @password, @role, @phone, @clientCategory, 'Approved', CURRENT_TIMESTAMP, 1)
+    ON CONFLICT(email) DO UPDATE SET
+      name = excluded.name,
+      password = excluded.password,
+      role = excluded.role,
+      phone = excluded.phone,
+      client_category = excluded.client_category,
+      approval_status = 'Approved',
+      approved_at = COALESCE(users.approved_at, CURRENT_TIMESTAMP),
+      is_demo = 1
+  `);
+  const insertDemoUsers = db.transaction((users) => {
+    for (const [name, email, password, role, phone, clientCategory] of users) {
+      upsertDemoUser.run({ name, email, password: hashPasswordSync(password), role, phone, clientCategory });
+    }
+  });
+  insertDemoUsers(demoUsers);
+  db.prepare("UPDATE users SET is_demo=1 WHERE email IN ('admin@flx.local','client@flx.local','agent@flx.local','owner@flx.local','investor@flx.local')").run();
   if (!demoSeedMarker) {
-    const demoUsers = [
-      ['Demo Client', 'client@flx.local', 'client123', 'Client', '+255700000001', 'University scholar (hostel)'],
-      ['Demo Agent', 'agent@flx.local', 'agent123', 'Agent', '+255700000002', ''],
-      ['Demo Owner', 'owner@flx.local', 'owner123', 'Owner', '+255700000003', ''],
-      ['Demo Investor', 'investor@flx.local', 'investor123', 'Investor', '+255700000004', ''],
-    ];
-    const insertDemoUser = db.prepare(`
-      INSERT OR IGNORE INTO users (name, email, password, role, phone, client_category, approval_status, approved_at, is_demo)
-      VALUES (?, ?, ?, ?, ?, ?, 'Approved', CURRENT_TIMESTAMP, 1)
-    `);
-    const insertDemoUsers = db.transaction((users) => {
-      for (const [name, email, password, role, phone, clientCategory] of users) {
-        insertDemoUser.run(name, email, hashPasswordSync(password), role, phone, clientCategory);
-      }
-    });
-    insertDemoUsers(demoUsers);
-    db.prepare("UPDATE users SET is_demo=1 WHERE email IN ('client@flx.local','agent@flx.local','owner@flx.local','investor@flx.local')").run();
     db.prepare("INSERT INTO app_data (key_name,key_value) VALUES ('demoAccountsSeeded','true')").run();
   }
 
@@ -2293,14 +2315,16 @@ export const createApp = () => {
   });
 
   app.post('/api/auth/login', async (req, res) => {
-    const { email, password } = req.body || {};
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required.' });
+    const { email, phone, username, identifier, password } = req.body || {};
+    const loginIdentifier = String(identifier || email || phone || username || '').trim();
+    if (!loginIdentifier || !password) {
+      return res.status(400).json({ error: 'Email, phone, username, and password are required.' });
     }
 
-    const normalizedEmail = String(email).trim().toLowerCase();
+    const normalizedIdentifier = loginIdentifier.toLowerCase();
+    const normalizedPhone = loginIdentifier.replace(/[^0-9+]/g, '').toLowerCase();
     const nowMs = Date.now();
-    const attemptKey = `${req.ip || req.socket.remoteAddress}:${normalizedEmail}`;
+    const attemptKey = `${req.ip || req.socket.remoteAddress}:${normalizedIdentifier}`;
     const priorAttempts = loginFailures.get(attemptKey);
     const attempts = !priorAttempts || nowMs - priorAttempts.startedAt > 15 * 60 * 1000
       ? { count: 0, startedAt: nowMs }
@@ -2310,12 +2334,24 @@ export const createApp = () => {
     if (isPostgresMode) {
       try {
         const client = await getPostgresClient();
-        const result = await client.query('SELECT * FROM users WHERE email = $1', [normalizedEmail]);
+        const result = await client.query(
+          'SELECT * FROM users WHERE LOWER(COALESCE(email, \'\')) = $1 OR LOWER(COALESCE(phone, \'\')) = $2 OR LOWER(COALESCE(username, \'\')) = $3 OR LOWER(COALESCE(name, \'\')) = $4 LIMIT 1',
+          [normalizedIdentifier, normalizedPhone, normalizedIdentifier, normalizedIdentifier],
+        );
         user = result.rows[0];
       } catch (error) {
         return res.status(503).json({ error: error instanceof Error ? error.message : 'Authentication service unavailable.' });
       }
-    } else user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
+    } else {
+      user = db.prepare(`
+        SELECT * FROM users
+        WHERE LOWER(COALESCE(email, '')) = ?
+           OR LOWER(COALESCE(phone, '')) = ?
+           OR LOWER(COALESCE(username, '')) = ?
+           OR LOWER(COALESCE(name, '')) = ?
+        LIMIT 1
+      `).get(normalizedIdentifier, normalizedPhone, normalizedIdentifier, normalizedIdentifier);
+    }
 
     if (!user || !(await verifyPassword(password, user.password))) {
       loginFailures.set(attemptKey, { count: attempts.count + 1, startedAt: attempts.startedAt });
@@ -2365,14 +2401,18 @@ export const createApp = () => {
   });
 
   app.post('/api/auth/register', async (req, res) => {
-    const { name, email, password, role, client_category: clientCategory, phone } = req.body || {};
-    if (!name || !email || !password) {
-      return res.status(400).json({ error: 'Name, email, and password are required.' });
+    const { name, email, password, role, client_category: clientCategory, phone, username } = req.body || {};
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanPhone = String(phone || '').trim();
+    const cleanUsername = String(username || '').trim();
+    if (!name || (!cleanEmail && !cleanPhone) || !password) {
+      return res.status(400).json({ error: 'Name, email or phone, and password are required.' });
     }
     if (String(password).length < 6) return res.status(400).json({ error: 'Use a password with at least 6 characters.' });
 
-    const normalizedEmail = String(email).trim().toLowerCase();
+    const normalizedEmail = cleanEmail;
     const requestedRole = String(role || 'Client');
+    const usernameValue = cleanUsername || cleanEmail.split('@')[0] || `user-${Date.now()}`;
     const clientCategories = ['University scholar (hostel)', 'Frame (business space)', 'Apartment (residential tenants)', 'Land or property buyers'];
     if (!['Client', 'Owner', 'Agent', 'Investor'].includes(requestedRole)) {
       return res.status(400).json({ error: 'Public registration is available for Client, Owner, Agent, or Investor accounts only.' });
@@ -2385,14 +2425,34 @@ export const createApp = () => {
     if (isPostgresMode) {
       try {
         const client = await getPostgresClient();
-        const result = await client.query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
-        existing = result.rows[0];
+        const emailMatch = normalizedEmail ? await client.query('SELECT id FROM users WHERE LOWER(email) = $1', [normalizedEmail]) : { rows: [] };
+        const phoneMatch = cleanPhone ? await client.query('SELECT id FROM users WHERE LOWER(COALESCE(phone, \'\')) = $1', [cleanPhone.replace(/\s+/g, '').toLowerCase()]) : { rows: [] };
+        const usernameMatch = usernameValue ? await client.query('SELECT id FROM users WHERE LOWER(COALESCE(username, \'\')) = $1', [usernameValue.toLowerCase()]) : { rows: [] };
+        existing = emailMatch.rows[0] || phoneMatch.rows[0] || usernameMatch.rows[0];
       } catch (error) {
         return res.status(503).json({ error: error instanceof Error ? error.message : 'Registration service unavailable.' });
       }
-    } else existing = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
+    } else {
+      const duplicateClauses = [];
+      const duplicateParams = [];
+      if (normalizedEmail) {
+        duplicateClauses.push('LOWER(COALESCE(email, \''\')) = ?');
+        duplicateParams.push(normalizedEmail);
+      }
+      if (cleanPhone) {
+        duplicateClauses.push('LOWER(COALESCE(phone, \''\')) = ?');
+        duplicateParams.push(cleanPhone.replace(/\s+/g, '').toLowerCase());
+      }
+      if (usernameValue) {
+        duplicateClauses.push('LOWER(COALESCE(username, \''\')) = ?');
+        duplicateParams.push(usernameValue.toLowerCase());
+      }
+      existing = duplicateClauses.length
+        ? db.prepare(`SELECT id FROM users WHERE ${duplicateClauses.join(' OR ')} LIMIT 1`).get(...duplicateParams)
+        : null;
+    }
     if (existing) {
-      return res.status(409).json({ error: 'Account already exists for that email.' });
+      return res.status(409).json({ error: 'An account already exists for that email or phone number.' });
     }
 
     let user;
@@ -2400,10 +2460,10 @@ export const createApp = () => {
       try {
         const client = await getPostgresClient();
         const result = await client.query(`
-          INSERT INTO users (name, email, password, role, phone, client_category, approval_status, approved_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, CASE WHEN $7 = 'Approved' THEN NOW() ELSE NULL END)
-          RETURNING id, name, email, role, phone, client_category, approval_status
-        `, [String(name).trim(), normalizedEmail, passwordHash, requestedRole, String(phone || '').trim(), requestedRole === 'Client' ? clientCategory : '', approvalStatus]);
+          INSERT INTO users (name, username, email, password, role, phone, client_category, approval_status, approved_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CASE WHEN $8 = 'Approved' THEN NOW() ELSE NULL END)
+          RETURNING id, name, username, email, role, phone, client_category, approval_status
+        `, [String(name).trim(), usernameValue, normalizedEmail || `user-${Date.now()}@flx.local`, passwordHash, requestedRole, cleanPhone, requestedRole === 'Client' ? clientCategory : '', approvalStatus]);
         user = result.rows[0];
         await client.query('INSERT INTO login_events (user_id, event_type, created_at) VALUES ($1, $2, $3)', [user.id, 'signup', now]);
       } catch (error) {
@@ -2412,9 +2472,9 @@ export const createApp = () => {
       }
     } else {
       const result = db.prepare(`
-        INSERT INTO users (name, email, password, role, phone, client_category, approval_status, approved_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(String(name).trim(), normalizedEmail, passwordHash, requestedRole, String(phone || '').trim(), requestedRole === 'Client' ? clientCategory : '', approvalStatus, approvalStatus === 'Approved' ? now : null);
+        INSERT INTO users (name, username, email, password, role, phone, client_category, approval_status, approved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(String(name).trim(), usernameValue, normalizedEmail || `user-${Date.now()}@flx.local`, passwordHash, requestedRole, cleanPhone, requestedRole === 'Client' ? clientCategory : '', approvalStatus, approvalStatus === 'Approved' ? now : null);
       user = db.prepare('SELECT id, name, email, role, phone, client_category, approval_status FROM users WHERE id = ?').get(result.lastInsertRowid);
       db.prepare('INSERT INTO login_events (user_id, event_type, created_at) VALUES (?, ?, ?)').run(user.id, 'signup', now);
     }

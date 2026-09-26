@@ -9,7 +9,10 @@ export const LocalAuthModal: React.FC = () => {
   const { isAuthModalOpen, closeAuthModal, signInWithEmail, registerAccount } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<'Agent' | 'Investor' | 'Owner' | 'Admin' | 'Client'>('Client');
   const [clientCategory, setClientCategory] = useState('');
@@ -19,7 +22,10 @@ export const LocalAuthModal: React.FC = () => {
   useEffect(() => {
     if (!isAuthModalOpen) {
       setName('');
+      setUsername('');
       setEmail('');
+      setPhone('');
+      setIdentifier('');
       setPassword('');
       setError('');
       setNotice('');
@@ -35,8 +41,8 @@ export const LocalAuthModal: React.FC = () => {
     setError('');
     setNotice('');
 
-    if (!email || !password) {
-      setError('Please fill in your email and password.');
+    if (!password) {
+      setError('Please enter your password or PIN.');
       return;
     }
 
@@ -45,10 +51,16 @@ export const LocalAuthModal: React.FC = () => {
         setError('Please enter a display name for your account.');
         return;
       }
+      if (!email.trim() && !phone.trim()) {
+        setError('Add an email address or phone number to create an account.');
+        return;
+      }
 
       const result = await registerAccount({
         name: name.trim(),
+        username: username.trim(),
         email: email.trim(),
+        phone: phone.trim(),
         password,
         role,
         clientCategory,
@@ -77,7 +89,7 @@ export const LocalAuthModal: React.FC = () => {
     }
 
     const result = await signInWithEmail({
-      email: email.trim(),
+      identifier: identifier.trim() || email.trim(),
       password,
     });
 
@@ -138,40 +150,79 @@ export const LocalAuthModal: React.FC = () => {
 
           <form onSubmit={handleSubmit} className="flx-auth-form">
             {mode === 'register' && (
+              <>
+                <label className="flx-auth-field">
+                  <span>Full name</span>
+                  <input
+                    autoComplete="name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Your name"
+                    className="flx-auth-input"
+                    required
+                  />
+                </label>
+                <label className="flx-auth-field">
+                  <span>Username (optional)</span>
+                  <input
+                    autoComplete="username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="yourname123"
+                    className="flx-auth-input"
+                  />
+                </label>
+              </>
+            )}
+
+            {mode === 'login' ? (
               <label className="flx-auth-field">
-                <span>Full name</span>
+                <span>Email, phone or username</span>
                 <input
-                  autoComplete="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Your name"
+                  type="text"
+                  autoComplete="username"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  placeholder="admin@flx.local, +255..., or username"
                   className="flx-auth-input"
                   required
                 />
               </label>
+            ) : (
+              <>
+                <label className="flx-auth-field">
+                  <span>Email address</span>
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="you@example.com"
+                    className="flx-auth-input"
+                  />
+                </label>
+                <label className="flx-auth-field">
+                  <span>Phone number</span>
+                  <input
+                    type="tel"
+                    autoComplete="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+255 712 345 678"
+                    className="flx-auth-input"
+                  />
+                </label>
+              </>
             )}
 
             <label className="flx-auth-field">
-              <span>{mode === 'login' ? 'Email or admin username' : 'Email'}</span>
-              <input
-                type={mode === 'login' ? 'text' : 'email'}
-                autoComplete={mode === 'login' ? 'username' : 'email'}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder={mode === 'login' ? 'Email or FLX admin' : 'you@example.com'}
-                className="flx-auth-input"
-                required
-              />
-            </label>
-
-            <label className="flx-auth-field">
-              <span>Password</span>
+              <span>Password or PIN</span>
               <input
                 type="password"
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === 'login' ? 'Password or PIN' : '••••••••'}
+                placeholder={mode === 'login' ? 'Your password or PIN' : 'Minimum 6 characters'}
                 className="flx-auth-input"
                 required
               />

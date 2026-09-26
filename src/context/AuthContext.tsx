@@ -10,7 +10,8 @@ interface LoginResult {
 }
 
 interface SignInInput {
-  email: string;
+  email?: string;
+  identifier?: string;
   password: string;
 }
 
@@ -18,6 +19,8 @@ interface RegisterInput extends SignInInput {
   name: string;
   role: AuthUser['role'];
   clientCategory?: string;
+  phone?: string;
+  username?: string;
 }
 
 interface ProfileUpdateInput {
@@ -84,10 +87,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const openAuthModal = useCallback(() => setIsAuthModalOpen(true), []);
   const closeAuthModal = useCallback(() => setIsAuthModalOpen(false), []);
 
-  const signInWithEmail = useCallback(async ({ email, password }: SignInInput): Promise<LoginResult> => {
+  const signInWithEmail = useCallback(async ({ email, identifier, password }: SignInInput): Promise<LoginResult> => {
     setIsLoading(true);
     try {
-      const nextUser = toAuthUser(await apiSignIn(email.trim(), password));
+      const loginIdentifier = (identifier ?? email ?? '').trim();
+      const nextUser = toAuthUser(await apiSignIn(loginIdentifier, password));
       setUser(nextUser);
       setIsAuthModalOpen(false);
       return { success: true, message: 'Signed in successfully.', role: nextUser.role };
@@ -98,10 +102,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  const registerAccount = useCallback(async ({ name, email, password, role, clientCategory }: RegisterInput): Promise<LoginResult> => {
+  const registerAccount = useCallback(async ({ name, email, phone, username, password, role, clientCategory }: RegisterInput): Promise<LoginResult> => {
     setIsLoading(true);
     try {
-      const account = await registerUser(name.trim(), email.trim(), password, role || 'Client', clientCategory || '');
+      const account = await registerUser(name.trim(), (email || '').trim(), password, role || 'Client', clientCategory || '', (phone || '').trim(), (username || '').trim());
       if (account.pending_approval) {
         return { success: true, pendingApproval: true, message: account.message || 'Your account is awaiting FLX approval.', role: account.role as AuthUser['role'] };
       }

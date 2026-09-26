@@ -11,11 +11,11 @@ export type SessionUser = {
   approval_status?: string;
 };
 
-export async function signIn(email: string, password: string) {
+export async function signIn(identifier: string, password: string) {
   const response = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email: identifier, phone: identifier, username: identifier, identifier, password }),
   });
 
   if (!response.ok) {
@@ -28,11 +28,11 @@ export async function signIn(email: string, password: string) {
   return payload.user as SessionUser;
 }
 
-export async function registerUser(name: string, email: string, password: string, role = 'Client', clientCategory = '') {
+export async function registerUser(name: string, email: string, password: string, role = 'Client', clientCategory = '', phone = '', username = '') {
   const response = await fetch('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, email, password, role, client_category: clientCategory }),
+    body: JSON.stringify({ name, email, phone, username, password, role, client_category: clientCategory }),
   });
 
   if (!response.ok) {

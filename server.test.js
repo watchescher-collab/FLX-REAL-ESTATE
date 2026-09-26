@@ -24,6 +24,27 @@ test('market summary and neighborhoods endpoints are available', async () => {
   }
 });
 
+test('admin demo account uses the documented password and logs in successfully', async () => {
+  const app = createApp();
+  const server = app.listen(0);
+
+  try {
+    const port = server.address().port;
+    const response = await fetch(`http://127.0.0.1:${port}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'admin@flx.local', password: 'admin123' }),
+    });
+    const payload = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.user.role, 'Admin');
+    assert.ok(payload.token);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('investor demo account uses the documented password and logs in successfully', async () => {
   const app = createApp();
   const server = app.listen(0);
