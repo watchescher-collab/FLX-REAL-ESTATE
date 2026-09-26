@@ -3,15 +3,14 @@ import type { ChangeEvent, KeyboardEvent, ReactElement } from "react";
 import { RealEstateLeafletMap } from "./components/RealEstateLeafletMap";
 import { HostelDetailPage } from "./components/HostelDetailPage";
 import { MarketplaceClientFlow } from "./components/MarketplaceClientFlow";
-import { OwnerDataStatusPage } from "./components/OwnerDataStatusPage";
 import { PropertyManagementPage } from "./components/PropertyManagementPage";
 import { InvestorWorkspacePage } from "./components/InvestorWorkspacePage";
 import { LocalAuthModal } from "./components/LocalAuthModal";
 import { WorkspaceAccountMenu, WorkspaceTopBar } from "./components/WorkspaceChrome";
 import { AdminAccountsPage } from "./components/AdminAccountsPage";
-import { LegalEscrowStatusPage } from "./components/LegalEscrowStatusPage";
 import { LegalEscrowConsolePage } from "./components/LegalEscrowConsolePage";
 import { CadastralDiligencePage } from "./components/CadastralDiligencePage";
+import { OwnerDashboardReferencePage } from "./components/OwnerDashboardReferencePage";
 import "./components/workspaceAccess.css";
 import "./components/opsControl.css";
 import { getStoredToken, signIn as signInApi, signOut as signOutApi } from "./auth";
@@ -1486,8 +1485,8 @@ export default function FlxOsApp() {
     return <HostelDetailPage />;
   }
 
-  if (pathname === '/owner' || pathname === '/owner/dashboard') {
-    return <OwnerDataStatusPage />;
+  if (pathname === '/owner' || pathname === '/owner/dashboard' || pathname === '/owner/portfolio') {
+    return <OwnerDashboardReferencePage />;
   }
 
   if (pathname === '/properties/manage') {

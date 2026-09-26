@@ -275,58 +275,58 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 16px;
-  background: rgba(0, 0, 0, .78);
-  backdrop-filter: blur(5px);
+  background: rgba(8, 8, 10, .72);
+  backdrop-filter: blur(6px);
 }
 
 .flx-auth-dialog {
   display: flex;
-  width: min(100%, 480px);
+  width: min(100%, 500px);
   max-height: min(760px, calc(100dvh - 32px));
   flex-direction: column;
   overflow-y: auto;
-  border: 1px solid rgba(196, 18, 26, .5);
-  border-radius: 10px;
-  background: #101010;
+  border: 1.5px solid rgba(196, 18, 26, .9);
+  border-radius: 12px;
+  background: #0d0d0d;
   color: #fff;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, .5);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .52);
 }
 
 .flx-auth-header {
   display: flex;
-  min-height: 76px;
+  min-height: 78px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 20px;
+  padding: 14px 20px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, .12);
 }
 
 .flx-auth-brand { display: flex; min-width: 0; align-items: center; gap: 12px; }
-.flx-auth-logo { display: block; width: 44px !important; height: 44px !important; flex: 0 0 44px; border-radius: 50%; background: #fff; object-fit: contain; }
+.flx-auth-logo { display: block; width: 42px !important; height: 42px !important; flex: 0 0 42px; border-radius: 50%; background: #fff; object-fit: contain; }
 .flx-auth-heading { min-width: 0; }
-.flx-auth-kicker { color: #ff565e; font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
-.flx-auth-title { margin: 4px 0 0; color: #fff; font-size: 19px; font-weight: 800; line-height: 1.2; }
-.flx-auth-close { display: grid; width: 36px; height: 36px; flex: 0 0 36px; place-items: center; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; background: transparent; color: #fff; cursor: pointer; }
-.flx-auth-close:hover { border-color: #c4121a; background: rgba(196,18,26,.16); }
+.flx-auth-kicker { color: #ff6167; font-size: 10px; font-weight: 900; letter-spacing: .12em; text-transform: uppercase; }
+.flx-auth-title { margin: 5px 0 0; color: #fff; font-size: 25px; font-weight: 800; line-height: 1.1; letter-spacing: -.05em; }
+.flx-auth-close { display: grid; width: 38px; height: 38px; flex: 0 0 38px; place-items: center; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; background: transparent; color: #fff; cursor: pointer; }
+.flx-auth-close:hover { border-color: #c4121a; background: rgba(196,18,26,.14); }
 .flx-auth-content { padding: 18px 20px 20px; }
-.flx-auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border: 1px solid rgba(255,255,255,.12); border-radius: 7px; background: #050505; }
-.flx-auth-tab { min-height: 36px; border: 0; border-radius: 4px; background: transparent; color: #c5c5c5; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.flx-auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border: 1px solid rgba(255,255,255,.12); border-radius: 8px; background: #050505; }
+.flx-auth-tab { min-height: 40px; border: 0; border-radius: 5px; background: transparent; color: #c5c5c5; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
 .flx-auth-tab.is-active { background: #c4121a; color: #fff; }
-.flx-auth-form { display: grid; gap: 13px; margin-top: 16px; }
-.flx-auth-field { display: grid; min-width: 0; gap: 6px; color: #d0d0d0; font-size: 11px; font-weight: 700; }
-.flx-auth-input { width: 100%; min-width: 0; min-height: 42px; padding: 9px 11px; border: 1px solid rgba(255,255,255,.16); border-radius: 5px; background: #191919; color: #fff; font: inherit; font-size: 13px; }
-.flx-auth-input::placeholder { color: #888; }
+.flx-auth-form { display: grid; gap: 14px; margin-top: 16px; }
+.flx-auth-field { display: grid; min-width: 0; gap: 7px; color: #d0d0d0; font-size: 11px; font-weight: 700; }
+.flx-auth-input { width: 100%; min-width: 0; min-height: 42px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.16); border-radius: 6px; background: #191919; color: #fff; font: inherit; font-size: 13px; }
+.flx-auth-input::placeholder { color: #8a8a8a; }
 .flx-auth-input:focus-visible { border-color: #c4121a; outline: 2px solid rgba(196,18,26,.35); outline-offset: 1px; }
-.flx-auth-role-field { display: grid; gap: 7px; }
+.flx-auth-role-field { display: grid; gap: 8px; }
 .flx-auth-field-label { color: #d0d0d0; font-size: 11px; font-weight: 700; }
 .flx-auth-roles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
-.flx-auth-role { display: flex; min-width: 0; min-height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 7px; border: 1px solid rgba(255,255,255,.16); border-radius: 5px; background: #171717; color: #e5e5e5; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
-.flx-auth-role.is-active { border-color: #c4121a; background: rgba(196,18,26,.16); color: #ff656c; }
+.flx-auth-role { display: flex; min-width: 0; min-height: 40px; align-items: center; justify-content: center; gap: 7px; padding: 8px; border: 1px solid rgba(255,255,255,.16); border-radius: 6px; background: #171717; color: #e5e5e5; font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; }
+.flx-auth-role.is-active { border-color: #c4121a; background: rgba(196,18,26,.14); color: #ff656c; }
 .flx-auth-role:last-child { grid-column: 1 / -1; }
 .flx-auth-error { padding: 10px 11px; border: 1px solid rgba(196,18,26,.55); border-radius: 5px; background: rgba(196,18,26,.13); color: #ff858b; font-size: 12px; line-height: 1.4; }
 .flx-auth-notice { padding: 10px 11px; border: 1px solid rgba(255,255,255,.24); border-radius: 5px; background: #1c1c1c; color: #fff; font-size: 12px; line-height: 1.45; }
-.flx-auth-submit { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 8px; margin-top: 2px; border: 1px solid #c4121a; border-radius: 5px; background: #c4121a; color: #fff; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.flx-auth-submit { display: flex; min-height: 46px; align-items: center; justify-content: center; gap: 8px; margin-top: 2px; border: 1px solid #c4121a; border-radius: 6px; background: #c4121a; color: #fff; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
 .flx-auth-submit:hover { background: #a20f17; }
 .flx-auth-dialog button:focus-visible { outline: 2px solid #ff565e; outline-offset: 2px; }
 
