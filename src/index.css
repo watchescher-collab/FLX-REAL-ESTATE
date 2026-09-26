@@ -2629,6 +2629,90 @@ article,
 
 .fx-service-card {
   padding: 20px;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.fx-service-card:hover,
+.fx-service-card.is-selected {
+  transform: translateY(-2px);
+  border-color: rgba(225,29,72,0.25);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.06);
+}
+
+.fx-service-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(280px, 0.9fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.fx-service-detail-card {
+  background: rgba(255,255,255,0.9);
+  border: 1px solid rgba(17,24,39,0.06);
+  border-radius: 26px;
+  padding: 24px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.05);
+}
+
+.fx-service-detail-card h2 {
+  margin: 0 0 12px;
+  font-size: clamp(2rem, 2vw, 2.8rem);
+  letter-spacing: -0.08em;
+  line-height: 1;
+}
+
+.fx-service-role-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.fx-role-pill {
+  appearance: none;
+  border: 1px solid rgba(17,24,39,0.08);
+  background: rgba(249,250,251,0.9);
+  color: #374151;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 8px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.fx-role-pill.is-active {
+  background: linear-gradient(135deg, #111827, #374151);
+  color: white;
+  border-color: transparent;
+}
+
+.fx-service-role-panel,
+.fx-service-match-block {
+  margin-top: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(17,24,39,0.06);
+}
+
+.fx-service-match-block strong {
+  font-size: 1.1rem;
+}
+
+.fx-service-match-block span {
+  color: #6b7280;
+  line-height: 1.6;
+}
+
+.fx-service-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
 }
 
 .fx-service-icon {

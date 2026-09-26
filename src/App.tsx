@@ -115,6 +115,29 @@ const bedRows = [
   { id: 'D', label: 'Bed D', status: 'Available' },
 ];
 
+const flxServiceCatalog = [
+  { slug: 'house-renting', title: 'House renting & leasing', description: 'Long-term and flexible rentals for families, professionals, and relocations.', roles: ['Client', 'Owner'], category: 'Homes' as const, accent: '🏡' },
+  { slug: 'apartment-renting', title: 'Apartment renting & leasing', description: 'Modern apartments for solo renters, roommates, and growing households.', roles: ['Client', 'Owner'], category: 'Apartments' as const, accent: '🏙️' },
+  { slug: 'rooms-hostels', title: 'Rooms & hostel rentals', description: 'Secure student, worker, and short-stay room inventory with verified management.', roles: ['Client', 'Owner', 'Agent'], category: 'Student' as const, accent: '🛏️' },
+  { slug: 'short-stay', title: 'Airbnb & short-stay properties', description: 'Managed short-stay assets for guest experience, daily occupancy, and turnover.', roles: ['Owner', 'Investor'], category: 'Homes' as const, accent: '✨' },
+  { slug: 'property-sales', title: 'Property buying & selling', description: 'End-to-end acquisition and resale support for homes, assets, and income properties.', roles: ['Client', 'Investor', 'Owner'], category: 'Homes' as const, accent: '💰' },
+  { slug: 'land-sales', title: 'Plot/land buying & selling', description: 'Residential, commercial, and strategic land transactions with due diligence support.', roles: ['Client', 'Investor', 'Owner'], category: 'Land' as const, accent: '🌱' },
+  { slug: 'farm-sales', title: 'Farms buying & selling', description: 'Agricultural land and farm operations for income generation or expansion.', roles: ['Investor', 'Owner'], category: 'Land' as const, accent: '🚜' },
+  { slug: 'investment-consultation', title: 'Real estate investment consultation', description: 'Portfolio advisory, buyer guidance, and yield assessment for growth-focused investors.', roles: ['Investor', 'Client'], category: 'Commercial' as const, accent: '📊' },
+  { slug: 'warehouse-sales', title: 'Warehouses/godowns renting & selling', description: 'Storage, logistics, and industrial facilities for tenants and operators.', roles: ['Client', 'Investor', 'Owner'], category: 'Commercial' as const, accent: '📦' },
+  { slug: 'industrial-yards', title: 'Industrial yards & open spaces', description: 'Flexible industrial land and open spaces for operations, staging, and expansion.', roles: ['Investor', 'Owner'], category: 'Commercial' as const, accent: '🏭' },
+  { slug: 'valuation', title: 'Property valuation assistance', description: 'Accurate value guidance for pricing strategy, financing, and acquisition decisions.', roles: ['Owner', 'Investor', 'Agent'], category: 'Commercial' as const, accent: '📐' },
+  { slug: 'sourcing', title: 'Property sourcing on request', description: 'Bespoke acquisition support, targeting the right asset and right terms.', roles: ['Client', 'Investor'], category: 'Commercial' as const, accent: '🔎' },
+  { slug: 'management', title: 'Property management', description: 'Operations, tenant support, and portfolio oversight for owners and landlords.', roles: ['Owner', 'Agent', 'Admin'], category: 'Homes' as const, accent: '🧭' },
+  { slug: 'marketing', title: 'Property marketing & listing', description: 'Branding, listing campaigns, and go-to-market preparation for real estate owners.', roles: ['Owner', 'Agent', 'Admin'], category: 'Commercial' as const, accent: '📢' },
+  { slug: 'commercial-leasing', title: 'Commercial property leasing & sales', description: 'Retail, office, and mixed-use spaces aligned to business strategy and location.', roles: ['Client', 'Owner', 'Investor'], category: 'Commercial' as const, accent: '🏬' },
+  { slug: 'office-renting', title: 'Office space renting', description: 'Flexible office solutions for startups, SMEs, and growing businesses.', roles: ['Client', 'Owner'], category: 'Commercial' as const, accent: '💼' },
+  { slug: 'retail-renting', title: 'Shops & retail space renting', description: 'Prime retail units and storefronts for traders, brands, and businesses.', roles: ['Client', 'Owner'], category: 'Commercial' as const, accent: '🛍️' },
+  { slug: 'documentation', title: 'Land & property documentation assistance', description: 'Support on title checks, paperwork, and transaction files for safer closings.', roles: ['Owner', 'Client', 'Agent'], category: 'Land' as const, accent: '📄' },
+  { slug: 'viewing-assistance', title: 'Property viewing & inspection assistance', description: 'Guided tours, inspection scheduling, and decision support before commitment.', roles: ['Client', 'Investor'], category: 'Homes' as const, accent: '👀' },
+  { slug: 'tenant-support', title: 'Tenant & landlord support', description: 'Conflict resolution, paperwork, occupancy support, and day-to-day property guidance.', roles: ['Owner', 'Client', 'Agent'], category: 'Homes' as const, accent: '🤝' },
+];
+
 const paymentMethods = ['M-Pesa', 'Tigo Pesa', 'Airtel Money', 'CRDB', 'NMB'];
 const dealSteps = ['Reservation Paid', 'Digital Lease', 'Document Review', 'Move-In Pass'];
 
@@ -152,6 +175,7 @@ const BrandWordmark = ({ compact = false }: { compact?: boolean }) => (
 function App() {
   const [activeScreen, setActiveScreen] = useState<Screen>('market');
   const [selectedRole, setSelectedRole] = useState<Role>('Client');
+  const [selectedServiceSlug, setSelectedServiceSlug] = useState<string>(flxServiceCatalog[0].slug);
   const [selectedShowcaseTab, setSelectedShowcaseTab] = useState<'Rent' | 'Sell' | 'Buy'>('Rent');
   const [landingView, setLandingView] = useState<LandingView>('home');
   const [mapFilter, setMapFilter] = useState<'All' | 'Rent' | 'Buy'>('All');
@@ -855,6 +879,22 @@ function App() {
   const savedListings = useMemo(
     () => listings.filter((listing) => savedIds.includes(listing.id)),
     [listings, savedIds],
+  );
+
+  const selectedService = useMemo(
+    () => flxServiceCatalog.find((service) => service.slug === selectedServiceSlug) ?? flxServiceCatalog[0],
+    [selectedServiceSlug],
+  );
+
+  const selectedServiceListings = useMemo(
+    () => listings.filter((listing) => {
+      const category = getListingCategory(listing);
+      const matchesServiceCategory = selectedService.category === 'Commercial'
+        ? category === 'Commercial' || category === 'Student'
+        : category === selectedService.category;
+      return matchesServiceCategory;
+    }),
+    [listings, selectedService],
   );
 
   const clientListings = useMemo(
@@ -2251,65 +2291,80 @@ function App() {
         {landingView === 'services' && (
           <section className="fx-service-screen" id="services">
             <div className="fx-screen-crumbs">
-              <span>What we do</span>
+              <span>Property services</span>
             </div>
-            <div className="fx-service-grid">
-              {[
-                {
-                  title: 'Residential & short-stay',
-                  icon: '🏡',
-                  list: [
-                    'House renting & leasing',
-                    'Apartment renting & leasing',
-                    'Rooms & hostel rentals',
-                    'Airbnb & short-stay properties',
-                  ],
-                },
-                {
-                  title: 'Land, farms & investment',
-                  icon: '🌍',
-                  list: [
-                    'Property buying & selling',
-                    'Plot/land buying & selling',
-                    'Farms buying & selling',
-                    'Real estate investment consultation',
-                  ],
-                },
-                {
-                  title: 'Commercial & industrial',
-                  icon: '🏢',
-                  list: [
-                    'Warehouses/godowns renting & selling',
-                    'Industrial yards & open spaces',
-                    'Commercial property leasing & sales',
-                    'Office space renting',
-                    'Shops & retail space renting',
-                  ],
-                },
-                {
-                  title: 'Support & management',
-                  icon: '🛡️',
-                  list: [
-                    'Property valuation assistance',
-                    'Property sourcing on request',
-                    'Property management',
-                    'Property marketing & listing',
-                    'Property viewing & inspection assistance',
-                    'Tenant & landlord support',
-                    'Land & property documentation assistance',
-                  ],
-                },
-              ].map((service) => (
-                <article key={service.title} className="fx-service-card">
-                  <div className="fx-service-icon">{service.icon}</div>
-                  <h3>{service.title}</h3>
-                  <ul className="fx-service-list">
-                    {service.list.map((item) => (
-                      <li key={item}>{item}</li>
+
+            <div className="fx-service-layout">
+              <div className="fx-service-grid">
+                {flxServiceCatalog.map((service) => (
+                  <article
+                    key={service.slug}
+                    className={`fx-service-card ${selectedServiceSlug === service.slug ? 'is-selected' : ''}`}
+                    onClick={() => setSelectedServiceSlug(service.slug)}
+                    aria-pressed={selectedServiceSlug === service.slug}
+                  >
+                    <div className="fx-service-icon">{service.accent}</div>
+                    <h3>{service.title}</h3>
+                    <p>{service.description}</p>
+                    <div className="fx-service-role-row">
+                      {service.roles.map((role) => (
+                        <span key={role} className="fx-role-pill">{role}</span>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+
+              <aside className="fx-service-detail-card">
+                <span className="fx-kicker">{selectedService.accent} SERVICE SCREEN</span>
+                <h2>{selectedService.title}</h2>
+                <p>{selectedService.description}</p>
+
+                <div className="fx-service-role-panel">
+                  <strong>Best for</strong>
+                  <div className="fx-service-role-row">
+                    {selectedService.roles.map((role) => (
+                      <button
+                        key={role}
+                        type="button"
+                        className={`fx-role-pill ${selectedRole === role ? 'is-active' : ''}`}
+                        onClick={() => setSelectedRole(role as Role)}
+                      >
+                        {role}
+                      </button>
                     ))}
-                  </ul>
-                </article>
-              ))}
+                  </div>
+                </div>
+
+                <div className="fx-service-action-row">
+                  <button
+                    type="button"
+                    className="fx-client-primary-btn"
+                    onClick={() => {
+                      setPropertyCategory(selectedService.category);
+                      setClientIntent(selectedService.category === 'Land' ? 'Buy' : 'Rent');
+                      setLandingView('properties');
+                    }}
+                  >
+                    View {selectedService.title.toLowerCase()} listings
+                  </button>
+                  <button
+                    type="button"
+                    className="fx-client-secondary-btn"
+                    onClick={() => {
+                      setSelectedRole((selectedService.roles[0] || 'Client') as Role);
+                      setLandingView('more');
+                    }}
+                  >
+                    Talk to FLX
+                  </button>
+                </div>
+
+                <div className="fx-service-match-block">
+                  <strong>{selectedServiceListings.length} live matches</strong>
+                  <span>Connected to the property API and filtered by the current service category.</span>
+                </div>
+              </aside>
             </div>
           </section>
         )}

@@ -259,6 +259,38 @@ test('client property requests require consent and never claim a payment or rese
   }
 });
 
+test('service requests are saved under their own route and service slug', async () => {
+  const app = createApp();
+  const server = app.listen(0);
+
+  try {
+    const port = server.address().port;
+    const response = await fetch(`http://127.0.0.1:${port}/api/service-requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        service_slug: 'house-renting',
+        service_title: 'House renting & leasing',
+        client_name: 'Service Client',
+        client_email: `service-${randomUUID()}@example.test`,
+        client_phone: '+255713000111',
+        intent: 'Rent',
+        preferred_date: '2026-10-02',
+        note: 'Looking for a family home with a secure compound.',
+        consent: true,
+      }),
+    });
+    const payload = await response.json();
+
+    assert.equal(response.status, 201);
+    assert.equal(payload.request.service_slug, 'house-renting');
+    assert.equal(payload.request.status, 'Awaiting response');
+    assert.ok(payload.message.includes('FLX team'));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('landing-page contact form records one consented CRM request', async () => {
   const app = createApp();
   const server = app.listen(0);

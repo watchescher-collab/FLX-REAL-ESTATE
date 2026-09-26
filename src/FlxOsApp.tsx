@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChangeEvent, KeyboardEvent, ReactElement } from "react";
+import type { ChangeEvent, KeyboardEvent, ReactElement, FormEvent } from "react";
 import { RealEstateLeafletMap } from "./components/RealEstateLeafletMap";
 import { HostelDetailPage } from "./components/HostelDetailPage";
 import { MarketplaceClientFlow } from "./components/MarketplaceClientFlow";
@@ -121,6 +121,29 @@ const crmAuthHeaders = () => {
   const token = getStoredToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 };
+
+const serviceCatalog = [
+  { slug: "house-renting", title: "House renting & leasing", description: "Long-term and flexible rentals for families, professionals, and relocations.", category: "Homes", accent: "🏡", roles: ["Client", "Owner"] },
+  { slug: "apartment-renting", title: "Apartment renting & leasing", description: "Modern apartments for solo renters, roommates, and growing households.", category: "Apartments", accent: "🏙️", roles: ["Client", "Owner"] },
+  { slug: "rooms-hostels", title: "Rooms & hostel rentals", description: "Secure student and worker accommodation with verified onboarding and support.", category: "Student", accent: "🛏️", roles: ["Client", "Owner", "Agent"] },
+  { slug: "short-stay", title: "Airbnb & short-stay properties", description: "Managed short-stay assets for guest experience, daily occupancy, and turnover.", category: "Homes", accent: "✨", roles: ["Owner", "Investor"] },
+  { slug: "property-sales", title: "Property buying & selling", description: "End-to-end acquisition and resale support for homes, assets, and income properties.", category: "Homes", accent: "💰", roles: ["Client", "Investor", "Owner"] },
+  { slug: "land-sales", title: "Plot / land buying & selling", description: "Residential, commercial, and strategic land transactions with due diligence support.", category: "Land", accent: "🌱", roles: ["Client", "Investor", "Owner"] },
+  { slug: "farm-sales", title: "Farms buying & selling", description: "Agricultural land and farm operations for income generation or expansion.", category: "Land", accent: "🚜", roles: ["Investor", "Owner"] },
+  { slug: "investment-consultation", title: "Real estate investment consultation", description: "Portfolio advisory, buyer guidance, and yield assessment for growth-focused investors.", category: "Commercial", accent: "📊", roles: ["Investor", "Client"] },
+  { slug: "warehouse-sales", title: "Warehouses & godowns renting & selling", description: "Storage, logistics, and industrial facilities for tenants and operators.", category: "Commercial", accent: "📦", roles: ["Client", "Investor", "Owner"] },
+  { slug: "industrial-yards", title: "Industrial yards & open spaces", description: "Flexible industrial land and open spaces for operations, staging, and expansion.", category: "Commercial", accent: "🏭", roles: ["Investor", "Owner"] },
+  { slug: "valuation", title: "Property valuation assistance", description: "Accurate value guidance for pricing strategy, financing, and acquisition decisions.", category: "Commercial", accent: "📐", roles: ["Owner", "Investor", "Agent"] },
+  { slug: "sourcing", title: "Property sourcing on request", description: "Bespoke acquisition support targeting the right asset and right terms.", category: "Commercial", accent: "🔎", roles: ["Client", "Investor"] },
+  { slug: "management", title: "Property management", description: "Operations, tenant support, and portfolio oversight for owners and landlords.", category: "Homes", accent: "🧭", roles: ["Owner", "Agent", "Admin"] },
+  { slug: "marketing", title: "Property marketing & listing", description: "Branding, listing campaigns, and go-to-market preparation for real estate owners.", category: "Commercial", accent: "📢", roles: ["Owner", "Agent", "Admin"] },
+  { slug: "commercial-leasing", title: "Commercial property leasing & sales", description: "Retail, office, and mixed-use spaces aligned to business strategy and location.", category: "Commercial", accent: "🏬", roles: ["Client", "Owner", "Investor"] },
+  { slug: "office-renting", title: "Office space renting", description: "Flexible office solutions for startups, SMEs, and growing businesses.", category: "Commercial", accent: "💼", roles: ["Client", "Owner"] },
+  { slug: "retail-renting", title: "Shops & retail space renting", description: "Prime retail units and storefronts for traders, brands, and businesses.", category: "Commercial", accent: "🛍️", roles: ["Client", "Owner"] },
+  { slug: "documentation", title: "Land & property documentation assistance", description: "Support on title checks, paperwork, and transaction files for safer closings.", category: "Land", accent: "📄", roles: ["Owner", "Client", "Agent"] },
+  { slug: "viewing-assistance", title: "Property viewing & inspection assistance", description: "Guided tours, inspection scheduling, and decision support before commitment.", category: "Homes", accent: "👀", roles: ["Client", "Investor"] },
+  { slug: "tenant-support", title: "Tenant & landlord support", description: "Conflict resolution, paperwork, occupancy support, and day-to-day property guidance.", category: "Homes", accent: "🤝", roles: ["Owner", "Client", "Agent"] },
+];
 
 type OwnerDashboard = {
   portfolio?: {
@@ -1463,12 +1486,160 @@ function ProfileModal({
   );
 }
 
+function ServiceRequestPage() {
+  const location = useLocation();
+  const pathname = location.pathname.replace(/\/+$/, '');
+  const slug = pathname.split('/').filter(Boolean).slice(-1)[0] || 'house-renting';
+  const service = serviceCatalog.find((item) => item.slug === slug) ?? serviceCatalog[0];
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    preferredDate: '',
+    intent: 'Rent',
+    note: '',
+    consent: false,
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [status, setStatus] = useState<{ tone: 'error' | 'success' | 'info'; message: string } | null>(null);
+
+  const handleChange = (field: keyof typeof form, value: string | boolean) => {
+    setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!form.consent) {
+      setStatus({ tone: 'error', message: 'Please confirm consent before sending your request.' });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setStatus(null);
+
+    try {
+      const response = await fetch('/api/service-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_slug: service.slug,
+          service_title: service.title,
+          client_name: form.name.trim(),
+          client_email: form.email.trim(),
+          client_phone: form.phone.trim(),
+          intent: form.intent,
+          preferred_date: form.preferredDate || null,
+          note: form.note.trim(),
+          consent: true,
+        }),
+      });
+      const payload = await response.json().catch(() => ({ error: 'Service request could not be created.' }));
+      if (!response.ok) throw new Error(payload?.error || 'Service request could not be created.');
+      setStatus({ tone: 'success', message: payload.message || 'Your service request was sent to the FLX team.' });
+      setForm({ name: '', email: '', phone: '', preferredDate: '', intent: 'Rent', note: '', consent: false });
+    } catch (error) {
+      setStatus({ tone: 'error', message: error instanceof Error ? error.message : 'Service request could not be created.' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="market-reference-page market-landing-page">
+      <header className="market-reference-header market-landing-header">
+        <a className="market-reference-brand market-landing-brand" href="/" aria-label="Back to FLX home">
+          <img src="/assets/flx-logo-round.jpeg" alt="FLX Real Estate" />
+        </a>
+        <div className="market-reference-location">
+          <MapPin size={14} />
+          <span>
+            <small>SERVICE</small>
+            {service.title}
+          </span>
+        </div>
+        <a className="market-landing-header-cta" href="/marketplace">
+          Browse all properties
+        </a>
+      </header>
+
+      <main className="market-landing-about" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.05fr) minmax(0, 0.95fr)', gap: 24, alignItems: 'start' }}>
+        <section className="market-landing-hero" style={{ position: 'relative', minHeight: 360 }}>
+          <div className="market-landing-hero-copy" style={{ margin: 0 }}>
+            <span className="market-landing-eyebrow">{service.accent} FLX SERVICE</span>
+            <h1>{service.title}</h1>
+            <p>{service.description}</p>
+            <div className="fx-service-role-row" style={{ marginTop: 20 }}>
+              {service.roles.map((role) => (
+                <span key={role} className="fx-role-pill" style={{ display: 'inline-flex' }}>{role}</span>
+              ))}
+            </div>
+            <small style={{ display: 'block', marginTop: 20 }}>Best fit for: {service.category} · FLX team support available</small>
+          </div>
+        </section>
+
+        <section className="fx-client-request-form" style={{ background: 'rgba(255,255,255,0.9)', borderRadius: 24, padding: 24, border: '1px solid rgba(15,23,42,0.06)' }}>
+          <h2 style={{ margin: '0 0 12px', fontSize: '1.9rem', letterSpacing: '-0.06em' }}>Request this service</h2>
+          <form onSubmit={handleSubmit}>
+            <label>
+              Full name
+              <input required value={form.name} onChange={(event) => handleChange('name', event.target.value)} placeholder="Your full name" />
+            </label>
+            <label>
+              Email address
+              <input required type="email" value={form.email} onChange={(event) => handleChange('email', event.target.value)} placeholder="you@example.com" />
+            </label>
+            <label>
+              Phone number
+              <input required value={form.phone} onChange={(event) => handleChange('phone', event.target.value)} placeholder="+255 ..." />
+            </label>
+            <div className="fx-request-form-row">
+              <label>
+                Service intent
+                <select value={form.intent} onChange={(event) => handleChange('intent', event.target.value)}>
+                  <option value="Rent">Rent</option>
+                  <option value="Buy">Buy</option>
+                </select>
+              </label>
+              <label>
+                Preferred date
+                <input type="date" value={form.preferredDate} onChange={(event) => handleChange('preferredDate', event.target.value)} />
+              </label>
+            </div>
+            <label>
+              Project note
+              <textarea rows={4} value={form.note} onChange={(event) => handleChange('note', event.target.value)} placeholder="Tell us what you need and the urgency of the request." />
+            </label>
+            <label className="fx-checkbox-row" style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+              <input type="checkbox" checked={form.consent} onChange={(event) => handleChange('consent', event.target.checked)} />
+              <span>I consent to the FLX team contacting me about this service request.</span>
+            </label>
+
+            {status ? (
+              <div className={status.tone === 'success' ? 'fx-auth-message' : 'fx-auth-message'} style={{ marginTop: 16, background: status.tone === 'success' ? '#e8fff3' : '#fff1f2', color: status.tone === 'success' ? '#0d8a5f' : '#a11d33' }}>
+                {status.message}
+              </div>
+            ) : null}
+
+            <button type="submit" className="fx-client-primary-btn" disabled={isSubmitting} style={{ marginTop: 16 }}>
+              {isSubmitting ? 'Sending request...' : 'Send service request'}
+            </button>
+          </form>
+        </section>
+      </main>
+    </div>
+  );
+}
+
 export default function FlxOsApp() {
   const location = useLocation();
   const pathname = location.pathname;
 
   if (pathname === '/hostel/milimani') {
     return <HostelDetailPage />;
+  }
+
+  if (pathname.startsWith('/service/') || pathname.startsWith('/services/')) {
+    return <ServiceRequestPage />;
   }
 
   if (pathname === '/' || pathname === '/marketplace') {

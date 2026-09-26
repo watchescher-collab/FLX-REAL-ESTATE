@@ -881,6 +881,22 @@ const createTables = () => {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS service_requests (
+      id TEXT PRIMARY KEY,
+      service_slug TEXT NOT NULL,
+      service_title TEXT NOT NULL,
+      client_name TEXT NOT NULL,
+      client_email TEXT NOT NULL DEFAULT '',
+      client_phone TEXT NOT NULL DEFAULT '',
+      intent TEXT NOT NULL CHECK (intent IN ('Buy', 'Rent')),
+      preferred_date TEXT,
+      note TEXT NOT NULL DEFAULT '',
+      consent INTEGER NOT NULL CHECK (consent = 1),
+      status TEXT NOT NULL DEFAULT 'Awaiting response',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE UNIQUE INDEX IF NOT EXISTS property_requests_pending_email_idx
       ON property_requests(property_id, client_email)
       WHERE status = 'Awaiting availability review' AND client_email <> '';
@@ -1758,6 +1774,71 @@ export const createApp = () => {
       request: { id: requestId, property_id: propertyId, crm_lead_id: leadId, status: 'Awaiting availability review', created_at: now },
       payment_enabled: false,
       message: 'Request recorded for FLX review. This is not a reservation, availability confirmation, or payment.',
+    });
+  });
+
+  app.post('/api/service-requests', (req, res) => {
+    const body = req.body || {};
+    const serviceSlug = String(body.service_slug || '').trim();
+    const serviceTitle = String(body.service_title || '').trim();
+    const clientName = String(body.client_name || '').trim();
+    const email = String(body.client_email || '').trim().toLowerCase();
+    const phone = String(body.client_phone || '').trim();
+    const normalizedPhone = phone.replace(/\D/g, '');
+    const intent = String(body.intent || '').trim();
+    const note = String(body.note || '').trim();
+    const preferredDate = body.preferred_date ? new Date(body.preferred_date) : null;
+    if (!serviceSlug || !serviceTitle) return res.status(400).json({ error: 'A valid service is required.' });
+    if (!clientName) return res.status(400).json({ error: 'Your name is required.' });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+    if (!email && normalizedPhone.length < 7) return res.status(400).json({ error: 'Provide an email address or a valid phone number.' });
+    if (!['Buy', 'Rent'].includes(intent)) return res.status(400).json({ error: 'Choose Buy or Rent.' });
+    if (preferredDate && !Number.isFinite(preferredDate.getTime())) return res.status(400).json({ error: 'Preferred contact date is invalid.' });
+    if (body.consent !== true) return res.status(400).json({ error: 'Consent is required before FLX can respond.' });
+
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    if (isPostgresMode) {
+      const createServiceRequest = async () => {
+        const client = await getPostgresClient();
+        const result = await client.query(
+          `INSERT INTO service_requests (id, service_slug, service_title, client_name, client_email, client_phone, intent, preferred_date, note, consent, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE, 'Awaiting response', $10, $10)
+           RETURNING *`,
+          [id, serviceSlug, serviceTitle, clientName, email, phone, intent, preferredDate ? preferredDate.toISOString() : null, note, now],
+        );
+        return result.rows[0];
+      };
+
+      createServiceRequest().then((request) => {
+        res.status(201).json({ ok: true, request: { id: request.id, service_slug: request.service_slug, service_title: request.service_title, client_name: request.client_name, client_email: request.client_email, client_phone: request.client_phone, intent: request.intent, preferred_date: request.preferred_date, note: request.note, status: request.status }, message: 'Your service request was sent to the FLX team. We will contact you as soon as we confirm the next step.' });
+      }).catch((error) => {
+        res.status(500).json({ error: error instanceof Error ? error.message : 'Service request could not be saved.' });
+      });
+      return;
+    }
+
+    db.prepare(`
+      INSERT INTO service_requests (id, service_slug, service_title, client_name, client_email, client_phone, intent, preferred_date, note, consent, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'Awaiting response', ?, ?)
+    `).run(id, serviceSlug, serviceTitle, clientName, email, phone, intent, preferredDate ? preferredDate.toISOString() : null, note, now, now);
+
+    res.status(201).json({
+      ok: true,
+      request: {
+        id,
+        service_slug: serviceSlug,
+        service_title: serviceTitle,
+        client_name: clientName,
+        client_email: email,
+        client_phone: phone,
+        intent,
+        preferred_date: preferredDate ? preferredDate.toISOString() : null,
+        note,
+        status: 'Awaiting response',
+      },
+      message: 'Your service request was sent to the FLX team. We will contact you as soon as we confirm the next step.',
     });
   });
 
