@@ -2255,15 +2255,59 @@ function App() {
             </div>
             <div className="fx-service-grid">
               {[
-                { title: 'Buy & rent', copy: 'Shortlist verified homes and secure the right fit for your life or investment plan.', icon: '🏡' },
-                { title: 'Sell & market', copy: 'Position your property with premium listing strategy and local pricing guidance.', icon: '📈' },
-                { title: 'Investment advisory', copy: 'Find high-yield areas, analyze cash flow, and plan longer-term value.', icon: '💼' },
-                { title: 'Legal support', copy: 'Move through title checks, contracts, and document review with confidence.', icon: '🛡️' },
+                {
+                  title: 'Residential & short-stay',
+                  icon: '🏡',
+                  list: [
+                    'House renting & leasing',
+                    'Apartment renting & leasing',
+                    'Rooms & hostel rentals',
+                    'Airbnb & short-stay properties',
+                  ],
+                },
+                {
+                  title: 'Land, farms & investment',
+                  icon: '🌍',
+                  list: [
+                    'Property buying & selling',
+                    'Plot/land buying & selling',
+                    'Farms buying & selling',
+                    'Real estate investment consultation',
+                  ],
+                },
+                {
+                  title: 'Commercial & industrial',
+                  icon: '🏢',
+                  list: [
+                    'Warehouses/godowns renting & selling',
+                    'Industrial yards & open spaces',
+                    'Commercial property leasing & sales',
+                    'Office space renting',
+                    'Shops & retail space renting',
+                  ],
+                },
+                {
+                  title: 'Support & management',
+                  icon: '🛡️',
+                  list: [
+                    'Property valuation assistance',
+                    'Property sourcing on request',
+                    'Property management',
+                    'Property marketing & listing',
+                    'Property viewing & inspection assistance',
+                    'Tenant & landlord support',
+                    'Land & property documentation assistance',
+                  ],
+                },
               ].map((service) => (
                 <article key={service.title} className="fx-service-card">
                   <div className="fx-service-icon">{service.icon}</div>
                   <h3>{service.title}</h3>
-                  <p>{service.copy}</p>
+                  <ul className="fx-service-list">
+                    {service.list.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
                 </article>
               ))}
             </div>
