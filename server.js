@@ -312,6 +312,7 @@ const ensurePostgresSeedData = async () => {
   const client = await getPostgresClient();
   await client.query(postgresSchema);
   await client.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(80) NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(80) NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture TEXT NOT NULL DEFAULT '';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
@@ -2415,23 +2416,41 @@ export const createApp = () => {
     if (isPostgresMode) {
       try {
         const client = await getPostgresClient();
-        const result = await client.query(
-          'SELECT * FROM users WHERE LOWER(COALESCE(email, \'\')) = $1 OR LOWER(COALESCE(phone, \'\')) = $2 OR LOWER(COALESCE(username, \'\')) = $3 OR LOWER(COALESCE(name, \'\')) = $4 LIMIT 1',
-          [normalizedIdentifier, normalizedPhone, normalizedIdentifier, normalizedIdentifier],
-        );
+        const userColumns = await client.query(`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'users'
+        `);
+        const hasUsernameColumn = userColumns.rows.some((row) => row.column_name === 'username');
+        const query = hasUsernameColumn
+          ? 'SELECT * FROM users WHERE LOWER(COALESCE(email, \'\')) = $1 OR LOWER(COALESCE(phone, \'\')) = $2 OR LOWER(COALESCE(username, \'\')) = $3 OR LOWER(COALESCE(name, \'\')) = $4 LIMIT 1'
+          : 'SELECT * FROM users WHERE LOWER(COALESCE(email, \'\')) = $1 OR LOWER(COALESCE(phone, \'\')) = $2 OR LOWER(COALESCE(name, \'\')) = $3 LIMIT 1';
+        const params = hasUsernameColumn
+          ? [normalizedIdentifier, normalizedPhone, normalizedIdentifier, normalizedIdentifier]
+          : [normalizedIdentifier, normalizedPhone, normalizedIdentifier];
+        const result = await client.query(query, params);
         user = result.rows[0];
       } catch (error) {
         return res.status(503).json({ error: error instanceof Error ? error.message : 'Authentication service unavailable.' });
       }
     } else {
-      user = db.prepare(`
-        SELECT * FROM users
-        WHERE LOWER(COALESCE(email, '')) = ?
-           OR LOWER(COALESCE(phone, '')) = ?
-           OR LOWER(COALESCE(username, '')) = ?
-           OR LOWER(COALESCE(name, '')) = ?
-        LIMIT 1
-      `).get(normalizedIdentifier, normalizedPhone, normalizedIdentifier, normalizedIdentifier);
+      const hasUsernameColumn = db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'username'").get();
+      user = hasUsernameColumn
+        ? db.prepare(`
+            SELECT * FROM users
+            WHERE LOWER(COALESCE(email, '')) = ?
+               OR LOWER(COALESCE(phone, '')) = ?
+               OR LOWER(COALESCE(username, '')) = ?
+               OR LOWER(COALESCE(name, '')) = ?
+            LIMIT 1
+          `).get(normalizedIdentifier, normalizedPhone, normalizedIdentifier, normalizedIdentifier)
+        : db.prepare(`
+            SELECT * FROM users
+            WHERE LOWER(COALESCE(email, '')) = ?
+               OR LOWER(COALESCE(phone, '')) = ?
+               OR LOWER(COALESCE(name, '')) = ?
+            LIMIT 1
+          `).get(normalizedIdentifier, normalizedPhone, normalizedIdentifier);
     }
 
     if (!user || !(await verifyPassword(password, user.password))) {
@@ -2506,14 +2525,23 @@ export const createApp = () => {
     if (isPostgresMode) {
       try {
         const client = await getPostgresClient();
+        const userColumns = await client.query(`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'users'
+        `);
+        const hasUsernameColumn = userColumns.rows.some((row) => row.column_name === 'username');
         const emailMatch = normalizedEmail ? await client.query('SELECT id FROM users WHERE LOWER(email) = $1', [normalizedEmail]) : { rows: [] };
         const phoneMatch = cleanPhone ? await client.query('SELECT id FROM users WHERE LOWER(COALESCE(phone, \'\')) = $1', [cleanPhone.replace(/\s+/g, '').toLowerCase()]) : { rows: [] };
-        const usernameMatch = usernameValue ? await client.query('SELECT id FROM users WHERE LOWER(COALESCE(username, \'\')) = $1', [usernameValue.toLowerCase()]) : { rows: [] };
+        const usernameMatch = hasUsernameColumn && usernameValue
+          ? await client.query('SELECT id FROM users WHERE LOWER(COALESCE(username, \'\')) = $1', [usernameValue.toLowerCase()])
+          : { rows: [] };
         existing = emailMatch.rows[0] || phoneMatch.rows[0] || usernameMatch.rows[0];
       } catch (error) {
         return res.status(503).json({ error: error instanceof Error ? error.message : 'Registration service unavailable.' });
       }
     } else {
+      const hasUsernameColumn = db.prepare("SELECT 1 FROM pragma_table_info('users') WHERE name = 'username'").get();
       const duplicateClauses = [];
       const duplicateParams = [];
       if (normalizedEmail) {
@@ -2524,7 +2552,7 @@ export const createApp = () => {
         duplicateClauses.push("LOWER(COALESCE(phone, '')) = ?");
         duplicateParams.push(cleanPhone.replace(/\s+/g, '').toLowerCase());
       }
-      if (usernameValue) {
+      if (hasUsernameColumn && usernameValue) {
         duplicateClauses.push("LOWER(COALESCE(username, '')) = ?");
         duplicateParams.push(usernameValue.toLowerCase());
       }
