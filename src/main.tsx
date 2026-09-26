@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext.tsx';
 import { WorkspaceProvider } from './context/WorkspaceContext.tsx';
 import { BrowserRouter } from 'react-router-dom';
 import './index.css';
+import './brandTheme.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -1,10 +1,12 @@
-import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import { AuthUser } from '../types';
+import { fetchSessionUser, registerUser, signIn as apiSignIn, signOut as apiSignOut, updateProfile as apiUpdateProfile } from '../auth';
 
 interface LoginResult {
   success: boolean;
   message: string;
   role?: AuthUser['role'];
+  pendingApproval?: boolean;
 }
 
 interface SignInInput {
@@ -15,6 +17,19 @@ interface SignInInput {
 interface RegisterInput extends SignInInput {
   name: string;
   role: AuthUser['role'];
+  clientCategory?: string;
+}
+
+interface ProfileUpdateInput {
+  name: string;
+  email: string;
+  phone: string;
+  picture?: string;
+}
+
+interface ProfileUpdateResult {
+  success: boolean;
+  message: string;
 }
 
 interface AuthContextType {
@@ -28,143 +43,93 @@ interface AuthContextType {
   signUp: (input: RegisterInput) => Promise<LoginResult>;
   signInWithEmail: (input: SignInInput) => Promise<LoginResult>;
   registerAccount: (input: RegisterInput) => Promise<LoginResult>;
+  updateProfile: (input: ProfileUpdateInput) => Promise<ProfileUpdateResult>;
   signOut: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'flx_local_users';
-const SESSION_KEY = 'flx_local_session';
-
-function safeReadUsers(): Record<string, { name: string; email: string; password: string; role: AuthUser['role']; picture?: string; }> {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function persistUsers(data: Record<string, { name: string; email: string; password: string; role: AuthUser['role']; picture?: string; }>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
+const toAuthUser = (user: { id: number; name: string; email: string; role: string; phone?: string; profile_picture?: string; client_category?: string }): AuthUser => ({
+  id: String(user.id),
+  name: user.name,
+  email: user.email,
+  phone: user.phone,
+  picture: user.profile_picture,
+  clientCategory: user.client_category,
+  role: user.role as AuthUser['role'],
+  isVerified: true,
+  provider: 'local',
+});
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    try {
-      const saved = localStorage.getItem(SESSION_KEY);
-      if (!saved) return null;
-      return JSON.parse(saved);
-    } catch {
-      return null;
-    }
-  });
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-  const persistSession = useCallback((nextUser: AuthUser | null) => {
-    if (!nextUser) {
-      localStorage.removeItem(SESSION_KEY);
-      return;
-    }
-    localStorage.setItem(SESSION_KEY, JSON.stringify(nextUser));
+  useEffect(() => {
+    let isCurrent = true;
+    void fetchSessionUser()
+      .then((sessionUser) => {
+        if (isCurrent) setUser(sessionUser ? toAuthUser(sessionUser) : null);
+      })
+      .catch(() => {
+        if (isCurrent) setUser(null);
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoading(false);
+      });
+    return () => { isCurrent = false; };
   }, []);
 
-  const openAuthModal = useCallback(() => {
-    setIsAuthModalOpen(true);
-  }, []);
-
-  const closeAuthModal = useCallback(() => {
-    setIsAuthModalOpen(false);
-  }, []);
+  const openAuthModal = useCallback(() => setIsAuthModalOpen(true), []);
+  const closeAuthModal = useCallback(() => setIsAuthModalOpen(false), []);
 
   const signInWithEmail = useCallback(async ({ email, password }: SignInInput): Promise<LoginResult> => {
     setIsLoading(true);
-
     try {
-      const accounts = safeReadUsers();
-      const normalizedEmail = email.trim().toLowerCase();
-      const account = accounts[normalizedEmail];
-
-      if (!account) {
-        return { success: false, message: 'No account found with that email. Create one first.' };
-      }
-
-      if (account.password !== password) {
-        return { success: false, message: 'Incorrect password. Please try again.' };
-      }
-
-      const resolvedRole = account.role || 'Client';
-
-      const nextUser: AuthUser = {
-        id: `local-${normalizedEmail}`,
-        name: account.name,
-        email: account.email,
-        picture: account.picture,
-        role: resolvedRole,
-        isVerified: true,
-        provider: 'local',
-        lastLogin: new Date().toISOString(),
-      };
-
+      const nextUser = toAuthUser(await apiSignIn(email.trim(), password));
       setUser(nextUser);
-      persistSession(nextUser);
       setIsAuthModalOpen(false);
-      return { success: true, message: 'Signed in successfully.', role: resolvedRole };
-    } catch {
-      return { success: false, message: 'Unable to sign in. Please try again.' };
+      return { success: true, message: 'Signed in successfully.', role: nextUser.role };
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : 'Unable to sign in. Please try again.' };
     } finally {
       setIsLoading(false);
     }
-  }, [persistSession]);
+  }, []);
 
-  const registerAccount = useCallback(async ({ name, email, password, role }: RegisterInput): Promise<LoginResult> => {
+  const registerAccount = useCallback(async ({ name, email, password, role, clientCategory }: RegisterInput): Promise<LoginResult> => {
     setIsLoading(true);
-
     try {
-      const normalizedEmail = email.trim().toLowerCase();
-      const accounts = safeReadUsers();
-
-      if (accounts[normalizedEmail]) {
-        return { success: false, message: 'An account with this email already exists.' };
+      const account = await registerUser(name.trim(), email.trim(), password, role || 'Client', clientCategory || '');
+      if (account.pending_approval) {
+        return { success: true, pendingApproval: true, message: account.message || 'Your account is awaiting FLX approval.', role: account.role as AuthUser['role'] };
       }
-
-      const nextRole = role || 'Client';
-      const account = {
-        name: name.trim(),
-        email: normalizedEmail,
-        password,
-        role: nextRole,
-      };
-
-      accounts[normalizedEmail] = account;
-      persistUsers(accounts);
-
-      const nextUser: AuthUser = {
-        id: `local-${normalizedEmail}`,
-        name: account.name,
-        email: account.email,
-        role: nextRole,
-        isVerified: true,
-        provider: 'local',
-        lastLogin: new Date().toISOString(),
-      };
-
+      const nextUser = toAuthUser(account);
       setUser(nextUser);
-      persistSession(nextUser);
       setIsAuthModalOpen(false);
-      return { success: true, message: 'Account created successfully.', role: nextRole };
-    } catch {
-      return { success: false, message: 'Unable to create account. Please try again.' };
+      return { success: true, message: 'Account created successfully.', role: nextUser.role };
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : 'Unable to create account. Please try again.' };
     } finally {
       setIsLoading(false);
     }
-  }, [persistSession]);
+  }, []);
 
   const signOut = useCallback(() => {
+    apiSignOut();
     setUser(null);
-    persistSession(null);
-  }, [persistSession]);
+  }, []);
+
+  const updateProfile = useCallback(async (input: ProfileUpdateInput): Promise<ProfileUpdateResult> => {
+    if (!user) return { success: false, message: 'Sign in to edit your profile.' };
+    try {
+      setUser(toAuthUser(await apiUpdateProfile(input)));
+      return { success: true, message: 'Your profile has been updated.' };
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : 'Your profile could not be saved. Please try again.' };
+    }
+  }, [user]);
 
   const value = useMemo<AuthContextType>(() => ({
     user,
@@ -177,20 +142,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signUp: registerAccount,
     signInWithEmail,
     registerAccount,
+    updateProfile,
     signOut,
-  }), [user, isLoading, isAuthModalOpen, openAuthModal, closeAuthModal, signInWithEmail, registerAccount, signOut]);
+  }), [user, isLoading, isAuthModalOpen, openAuthModal, closeAuthModal, signInWithEmail, registerAccount, updateProfile, signOut]);
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (!context) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 };

@@ -1,0 +1,86 @@
+:root {
+  --flx-brand-red: #c4121a;
+  --flx-brand-black: #111111;
+  --flx-brand-white: #ffffff;
+}
+
+#root [class*="text-emerald-"],
+#root [class*="text-green-"],
+#root [class*="text-blue-"],
+#root [class*="text-cyan-"],
+#root [class*="text-teal-"],
+#root [class*="text-indigo-"],
+#root [class*="text-violet-"],
+#root [class*="text-purple-"],
+#root [class*="text-orange-"],
+#root [class*="text-amber-"],
+#root [class*="text-yellow-"] {
+  color: var(--flx-brand-red) !important;
+}
+
+#root [class*="bg-emerald-"],
+#root [class*="bg-green-"],
+#root [class*="bg-blue-"],
+#root [class*="bg-cyan-"],
+#root [class*="bg-teal-"],
+#root [class*="bg-indigo-"],
+#root [class*="bg-violet-"],
+#root [class*="bg-purple-"],
+#root [class*="bg-orange-"],
+#root [class*="bg-amber-"],
+#root [class*="bg-yellow-"] {
+  background-color: rgba(196, 18, 26, 0.1) !important;
+}
+
+#root [class*="bg-emerald-600"],
+#root [class*="bg-green-600"],
+#root [class*="bg-blue-600"],
+#root [class*="bg-cyan-600"],
+#root [class*="bg-teal-600"],
+#root [class*="bg-indigo-600"],
+#root [class*="bg-violet-600"],
+#root [class*="bg-purple-600"],
+#root [class*="bg-orange-600"],
+#root [class*="bg-amber-600"],
+#root [class*="bg-yellow-600"] {
+  background-color: var(--flx-brand-red) !important;
+}
+
+#root [class*="bg-emerald-950"],
+#root [class*="bg-green-950"],
+#root [class*="bg-blue-950"],
+#root [class*="bg-cyan-950"],
+#root [class*="bg-teal-950"],
+#root [class*="bg-indigo-950"],
+#root [class*="bg-violet-950"],
+#root [class*="bg-purple-950"],
+#root [class*="bg-orange-950"],
+#root [class*="bg-amber-950"],
+#root [class*="bg-yellow-950"] {
+  background-color: var(--flx-brand-black) !important;
+}
+
+#root [class*="border-emerald-"],
+#root [class*="border-green-"],
+#root [class*="border-blue-"],
+#root [class*="border-cyan-"],
+#root [class*="border-teal-"],
+#root [class*="border-indigo-"],
+#root [class*="border-violet-"],
+#root [class*="border-purple-"],
+#root [class*="border-orange-"],
+#root [class*="border-amber-"],
+#root [class*="border-yellow-"],
+#root [class*="ring-emerald-"],
+#root [class*="ring-green-"],
+#root [class*="ring-blue-"],
+#root [class*="ring-orange-"] {
+  border-color: var(--flx-brand-red) !important;
+  --tw-ring-color: var(--flx-brand-red) !important;
+}
+
+#root [class*="accent-emerald-"],
+#root [class*="accent-green-"],
+#root [class*="accent-blue-"] {
+  accent-color: var(--flx-brand-red) !important;
+}

@@ -10,10 +10,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const dataDir = path.join(__dirname, 'data');
 const dbPath = path.join(dataDir, 'flx.db');
-const databaseMode = String(process.env.DB_MODE || 'sqlite').toLowerCase();
-const postgresUrl = process.env.POSTGRES_URL || 'postgresql://postgres:postgres@localhost:5432/flx_real_estate';
-const isPostgresMode = databaseMode === 'postgres';
+const databaseMode = String(process.env.DB_MODE || '').toLowerCase();
+const postgresUrl = process.env.POSTGRES_URL || process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/flx_real_estate';
+const isPostgresMode = databaseMode === 'postgres' || (!databaseMode && Boolean(process.env.POSTGRES_URL || process.env.DATABASE_URL));
 const sessions = new Map();
+const loginFailures = new Map();
 let postgresClient = null;
 
 const getPostgresClient = async () => {
@@ -25,6 +26,90 @@ const getPostgresClient = async () => {
   return postgresClient;
 };
 
+const hashPassword = async (password) => {
+  const salt = crypto.randomBytes(16);
+  const derivedKey = await new Promise((resolve, reject) => {
+    crypto.scrypt(String(password), salt, 64, (error, key) => error ? reject(error) : resolve(key));
+  });
+  return `scrypt$${salt.toString('base64')}$${derivedKey.toString('base64')}`;
+};
+
+const hashPasswordSync = (password) => {
+  const salt = crypto.randomBytes(16);
+  const key = crypto.scryptSync(String(password), salt, 64);
+  return `scrypt$${salt.toString('base64')}$${key.toString('base64')}`;
+};
+
+const verifyPassword = async (password, storedPassword) => {
+  const stored = String(storedPassword || '');
+  if (!stored.startsWith('scrypt$')) {
+    const candidate = Buffer.from(String(password));
+    const legacy = Buffer.from(stored);
+    return candidate.length === legacy.length && crypto.timingSafeEqual(candidate, legacy);
+  }
+
+  const [, saltText, keyText] = stored.split('$');
+  if (!saltText || !keyText) return false;
+  const salt = Buffer.from(saltText, 'base64');
+  const expected = Buffer.from(keyText, 'base64');
+  if (salt.length !== 16 || expected.length !== 64) return false;
+  const actual = await new Promise((resolve, reject) => {
+    crypto.scrypt(String(password), salt, expected.length, (error, key) => error ? reject(error) : resolve(key));
+  });
+  return crypto.timingSafeEqual(actual, expected);
+};
+
+const provisionPostgresAdmin = async (client) => {
+  const email = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const password = String(process.env.ADMIN_PASSWORD || '');
+  if (!email && !password) return;
+  if (!email || password.length < 4) throw new Error('Set both ADMIN_EMAIL and an ADMIN_PASSWORD/PIN of at least 4 characters.');
+
+  if (email !== 'admin@flxrealestate.co.tz') {
+    await client.query(`
+      UPDATE users SET email=$1,password=$2,role='Admin',approval_status='Approved'
+      WHERE email='admin@flxrealestate.co.tz'
+    `, [email, await hashPassword(password)]);
+  }
+
+  await client.query(`
+    INSERT INTO users (name, email, password, role, approval_status, approved_at)
+    VALUES ('FLX Administrator', $1, $2, 'Admin', 'Approved', NOW())
+    ON CONFLICT (email) DO UPDATE SET
+      name = EXCLUDED.name,
+      password = EXCLUDED.password,
+      role = 'Admin',
+      approval_status = 'Approved',
+      approved_at = COALESCE(users.approved_at, NOW())
+  `, [email, await hashPassword(password)]);
+};
+
+const ensureUserWorkflowColumns = () => {
+  const columns = new Set(db.prepare('PRAGMA table_info(users)').all().map((column) => column.name));
+  const migrations = [
+    ['phone', "TEXT NOT NULL DEFAULT ''"],
+    ['profile_picture', "TEXT NOT NULL DEFAULT ''"],
+    ['is_demo', 'INTEGER NOT NULL DEFAULT 0'],
+    ['client_category', "TEXT NOT NULL DEFAULT ''"],
+    ['approval_status', "TEXT NOT NULL DEFAULT 'Approved'"],
+    ['approved_by', 'INTEGER'],
+    ['approved_at', 'TEXT'],
+    ['last_login_at', 'TEXT'],
+  ];
+  for (const [name, definition] of migrations) {
+    if (!columns.has(name)) db.exec(`ALTER TABLE users ADD COLUMN ${name} ${definition}`);
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS login_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS login_events_created_idx ON login_events(created_at DESC);
+  `);
+};
+
 const postgresSchema = `
   CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
@@ -32,8 +117,24 @@ const postgresSchema = `
     email VARCHAR(255) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     role VARCHAR(50) NOT NULL DEFAULT 'Client',
+    phone VARCHAR(80) NOT NULL DEFAULT '',
+    profile_picture TEXT NOT NULL DEFAULT '',
+    is_demo BOOLEAN NOT NULL DEFAULT FALSE,
+    client_category VARCHAR(80) NOT NULL DEFAULT '',
+    approval_status VARCHAR(30) NOT NULL DEFAULT 'Approved',
+    approved_by INTEGER,
+    approved_at TIMESTAMPTZ,
+    last_login_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  CREATE TABLE IF NOT EXISTS login_events (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    event_type VARCHAR(30) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS login_events_created_idx ON login_events(created_at DESC);
 
   CREATE TABLE IF NOT EXISTS listings (
     id SERIAL PRIMARY KEY,
@@ -49,8 +150,47 @@ const postgresSchema = `
     description TEXT NOT NULL,
     lat DOUBLE PRECISION DEFAULT -6.7924,
     lng DOUBLE PRECISION DEFAULT 39.2083,
+    property_kind VARCHAR(40) NOT NULL DEFAULT 'Apartment',
+    transaction_type VARCHAR(20) NOT NULL DEFAULT 'Rent',
+    approval_status VARCHAR(30) NOT NULL DEFAULT 'Approved',
+    owner_id INTEGER,
+    agent_id INTEGER,
+    created_by INTEGER,
+    unit_label VARCHAR(255) NOT NULL DEFAULT '',
+    bedrooms INTEGER NOT NULL DEFAULT 0,
+    bathrooms DOUBLE PRECISION NOT NULL DEFAULT 0,
+    features_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    images_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    videos_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    approval_note TEXT NOT NULL DEFAULT '',
+    approved_by INTEGER,
+    approved_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  CREATE TABLE IF NOT EXISTS property_history (
+    id UUID PRIMARY KEY,
+    property_id INTEGER NOT NULL,
+    actor_id INTEGER NOT NULL,
+    action VARCHAR(40) NOT NULL,
+    changes JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE TABLE IF NOT EXISTS property_media (
+    id UUID PRIMARY KEY,
+    property_id INTEGER NOT NULL REFERENCES listings(id),
+    media_type VARCHAR(20) NOT NULL CHECK (media_type IN ('photo', 'video')),
+    mime_type VARCHAR(120) NOT NULL,
+    original_name VARCHAR(255) NOT NULL,
+    data BYTEA NOT NULL,
+    byte_size INTEGER NOT NULL,
+    created_by INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS property_media_listing_idx ON property_media(property_id, created_at);
 
   CREATE TABLE IF NOT EXISTS saved_listings (
     id SERIAL PRIMARY KEY,
@@ -99,6 +239,69 @@ const postgresSchema = `
     key_value TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  CREATE TABLE IF NOT EXISTS crm_leads (
+    id UUID PRIMARY KEY,
+    title TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    client_name TEXT NOT NULL DEFAULT '',
+    client_email TEXT NOT NULL DEFAULT '',
+    client_phone TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT '',
+    intent TEXT NOT NULL DEFAULT 'General',
+    budget DOUBLE PRECISION,
+    preferred_area TEXT NOT NULL DEFAULT '',
+    property_id TEXT,
+    consent BOOLEAN NOT NULL DEFAULT FALSE,
+    urgency TEXT NOT NULL DEFAULT 'Normal',
+    next_contact_at TIMESTAMPTZ,
+    assigned_agent_id TEXT,
+    owner_id TEXT NOT NULL DEFAULT 'system',
+    stage TEXT NOT NULL DEFAULT 'New',
+    loss_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS crm_leads_email_idx ON crm_leads(client_email);
+  CREATE INDEX IF NOT EXISTS crm_leads_phone_idx ON crm_leads(client_phone);
+  CREATE INDEX IF NOT EXISTS crm_leads_stage_idx ON crm_leads(stage);
+
+  CREATE TABLE IF NOT EXISTS crm_activities (
+    id UUID PRIMARY KEY,
+    lead_id UUID NOT NULL REFERENCES crm_leads(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    body TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE TABLE IF NOT EXISTS crm_tasks (
+    id UUID PRIMARY KEY,
+    lead_id UUID NOT NULL REFERENCES crm_leads(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    due_at TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'Open',
+    owner_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  CREATE TABLE IF NOT EXISTS property_requests (
+    id UUID PRIMARY KEY,
+    property_id INTEGER NOT NULL REFERENCES listings(id),
+    crm_lead_id UUID NOT NULL REFERENCES crm_leads(id),
+    client_name TEXT NOT NULL,
+    client_email TEXT NOT NULL DEFAULT '',
+    client_phone TEXT NOT NULL DEFAULT '',
+    normalized_phone TEXT NOT NULL DEFAULT '',
+    intent TEXT NOT NULL CHECK (intent IN ('Buy', 'Rent')),
+    preferred_date TIMESTAMPTZ,
+    consent BOOLEAN NOT NULL CHECK (consent = TRUE),
+    status TEXT NOT NULL DEFAULT 'Awaiting availability review',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS property_requests_pending_email_idx ON property_requests(property_id, client_email) WHERE status = 'Awaiting availability review' AND client_email <> '';
+  CREATE UNIQUE INDEX IF NOT EXISTS property_requests_pending_phone_idx ON property_requests(property_id, normalized_phone) WHERE status = 'Awaiting availability review' AND normalized_phone <> '';
 `;
 
 const ensurePostgresSeedData = async () => {
@@ -106,6 +309,41 @@ const ensurePostgresSeedData = async () => {
 
   const client = await getPostgresClient();
   await client.query(postgresSchema);
+  await client.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(80) NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_picture TEXT NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_demo BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS client_category VARCHAR(80) NOT NULL DEFAULT '';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30) NOT NULL DEFAULT 'Approved';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_by INTEGER;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+    CREATE TABLE IF NOT EXISTS login_events (
+      id BIGSERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      event_type VARCHAR(30) NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS login_events_created_idx ON login_events(created_at DESC);
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS property_kind VARCHAR(40) NOT NULL DEFAULT 'Apartment';
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS transaction_type VARCHAR(20) NOT NULL DEFAULT 'Rent';
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS approval_status VARCHAR(30) NOT NULL DEFAULT 'Approved';
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS owner_id INTEGER;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS agent_id INTEGER;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS created_by INTEGER;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS unit_label VARCHAR(255) NOT NULL DEFAULT '';
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS bedrooms INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS bathrooms DOUBLE PRECISION NOT NULL DEFAULT 0;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS features_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS images_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS videos_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS approval_note TEXT NOT NULL DEFAULT '';
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS approved_by INTEGER;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+    ALTER TABLE listings ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+    UPDATE listings SET images_json = jsonb_build_array(image) WHERE images_json = '[]'::jsonb AND COALESCE(image, '') <> '';
+  `);
 
   const rows = await client.query('SELECT COUNT(*)::int AS count FROM listings');
   if (rows.rows[0].count === 0) {
@@ -118,16 +356,27 @@ const ensurePostgresSeedData = async () => {
     `);
   }
 
-  const userCount = await client.query('SELECT COUNT(*)::int AS count FROM users');
-  if (userCount.rows[0].count === 0) {
-    await client.query(`
-      INSERT INTO users (name, email, password, role) VALUES
-        ('Aisha Mtega', 'client@flx.local', 'client123', 'Client'),
-        ('Neema Joseph', 'owner@flx.local', 'owner123', 'Owner'),
-        ('Baraka Hassan', 'agent@flx.local', 'agent123', 'Agent'),
-        ('Daniel Kimaro', 'investor@flx.local', 'investor123', 'Investor'),
-        ('FLX Admin', 'admin@flx.local', 'admin123', 'Admin')
-    `);
+  await provisionPostgresAdmin(client);
+  const demoAccounts = [
+    ['Demo Client', 'client@flx.local', 'client123', 'Client', '+255700000001', 'University scholar (hostel)'],
+    ['Demo Agent', 'agent@flx.local', 'agent123', 'Agent', '+255700000002', ''],
+    ['Demo Owner', 'owner@flx.local', 'owner123', 'Owner', '+255700000003', ''],
+    ['Demo Investor', 'investor@flx.local', 'investor123', 'Investor', '+255700000004', ''],
+  ];
+  const demoSeedMarker = await client.query("SELECT 1 FROM app_data WHERE key_name='demoAccountsSeeded'");
+  if (!demoSeedMarker.rows.length) {
+    for (const [name, email, password, role, phone, clientCategory] of demoAccounts) {
+      await client.query(`
+        INSERT INTO users (name,email,password,role,phone,client_category,approval_status,approved_at,is_demo)
+        VALUES ($1,$2,$3,$4,$5,$6,'Approved',NOW(),TRUE)
+        ON CONFLICT(email) DO UPDATE SET is_demo=TRUE
+      `, [name, email, await hashPassword(password), role, phone, clientCategory]);
+    }
+    await client.query("INSERT INTO app_data (key_name,key_value) VALUES ('demoAccountsSeeded','true') ON CONFLICT(key_name) DO NOTHING");
+  }
+  const legacyUsers = await client.query("SELECT id, password FROM users WHERE password NOT LIKE 'scrypt$%'");
+  for (const user of legacyUsers.rows) {
+    await client.query('UPDATE users SET password = $1 WHERE id = $2', [await hashPassword(user.password), user.id]);
   }
 
   const marketCount = await client.query('SELECT COUNT(*)::int AS count FROM market_summary');
@@ -193,6 +442,65 @@ const ensureListingLocationColumns = () => {
     UPDATE listings
     SET lat = COALESCE(lat, -6.7924), lng = COALESCE(lng, 39.2083)
     WHERE lat IS NULL OR lng IS NULL
+  `);
+};
+
+const ensurePropertyWorkflowColumns = () => {
+  const columns = db.prepare('PRAGMA table_info(listings)').all();
+  const existing = new Set(columns.map((column) => column.name));
+  const additions = [
+    ['property_kind', "TEXT NOT NULL DEFAULT 'Apartment'"],
+    ['transaction_type', "TEXT NOT NULL DEFAULT 'Rent'"],
+    ['approval_status', "TEXT NOT NULL DEFAULT 'Approved'"],
+    ['owner_id', 'INTEGER'],
+    ['agent_id', 'INTEGER'],
+    ['created_by', 'INTEGER'],
+    ['unit_label', "TEXT NOT NULL DEFAULT ''"],
+    ['bedrooms', 'INTEGER NOT NULL DEFAULT 0'],
+    ['bathrooms', 'REAL NOT NULL DEFAULT 0'],
+    ['features_json', "TEXT NOT NULL DEFAULT '[]'"],
+    ['images_json', "TEXT NOT NULL DEFAULT '[]'"],
+    ['videos_json', "TEXT NOT NULL DEFAULT '[]'"],
+    ['approval_note', "TEXT NOT NULL DEFAULT ''"],
+    ['approved_by', 'INTEGER'],
+    ['approved_at', 'TEXT'],
+    ['updated_at', "TEXT NOT NULL DEFAULT ''"],
+    ['deleted_at', 'TEXT'],
+  ];
+  for (const [name, definition] of additions) {
+    if (!existing.has(name)) db.exec(`ALTER TABLE listings ADD COLUMN ${name} ${definition}`);
+  }
+  db.exec(`
+    UPDATE listings
+    SET images_json = json_array(image)
+    WHERE (images_json IS NULL OR images_json = '[]') AND COALESCE(image, '') <> ''
+  `);
+  db.exec("UPDATE listings SET updated_at = COALESCE(NULLIF(updated_at, ''), CURRENT_TIMESTAMP) WHERE updated_at IS NULL OR updated_at = ''");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS property_history (
+      id TEXT PRIMARY KEY,
+      property_id INTEGER NOT NULL,
+      actor_id INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      changes_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS property_history_record_idx ON property_history(property_id, created_at);
+    CREATE TABLE IF NOT EXISTS property_media (
+      id TEXT PRIMARY KEY,
+      property_id INTEGER NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+      media_type TEXT NOT NULL CHECK (media_type IN ('photo', 'video')),
+      mime_type TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      data BLOB NOT NULL,
+      byte_size INTEGER NOT NULL,
+      created_by INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS property_media_listing_idx ON property_media(property_id, created_at);
+    CREATE INDEX IF NOT EXISTS listings_owner_idx ON listings(owner_id, approval_status);
+    CREATE INDEX IF NOT EXISTS listings_agent_idx ON listings(agent_id, approval_status);
+    CREATE INDEX IF NOT EXISTS listings_approval_idx ON listings(approval_status, deleted_at);
   `);
 };
 
@@ -421,8 +729,24 @@ const createTables = () => {
       email TEXT NOT NULL UNIQUE,
       password TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'Client',
+      phone TEXT NOT NULL DEFAULT '',
+      profile_picture TEXT NOT NULL DEFAULT '',
+      is_demo INTEGER NOT NULL DEFAULT 0,
+      client_category TEXT NOT NULL DEFAULT '',
+      approval_status TEXT NOT NULL DEFAULT 'Approved',
+      approved_by INTEGER,
+      approved_at TEXT,
+      last_login_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS login_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS login_events_created_idx ON login_events(created_at DESC);
 
     CREATE TABLE IF NOT EXISTS listings (
       id INTEGER PRIMARY KEY,
@@ -553,6 +877,8 @@ const createTables = () => {
       WHERE status = 'Awaiting availability review' AND normalized_phone <> '';
   `);
 
+  ensureUserWorkflowColumns();
+
   const legacyAgentRow = db.prepare('SELECT key_value FROM app_data WHERE key_name = ?').get('agentDashboard');
   if (legacyAgentRow && !db.prepare('SELECT 1 FROM crm_leads LIMIT 1').get()) {
     try {
@@ -661,21 +987,27 @@ const createTables = () => {
     })));
   }
 
-  const demoUsers = [
-    ['Aisha Mtega', 'client@flx.local', 'client123', 'Client'],
-    ['Neema Joseph', 'owner@flx.local', 'owner123', 'Owner'],
-    ['Baraka Hassan', 'agent@flx.local', 'agent123', 'Agent'],
-    ['Daniel Kimaro', 'investor@flx.local', 'investor123', 'Investor'],
-    ['FLX Admin', 'admin@flx.local', 'admin123', 'Admin'],
-  ];
-  const insertDemoUser = db.prepare(`
-    INSERT OR IGNORE INTO users (name, email, password, role)
-    VALUES (?, ?, ?, ?)
-  `);
-  const insertDemoUsers = db.transaction((users) => {
-    for (const user of users) insertDemoUser.run(...user);
-  });
-  insertDemoUsers(demoUsers);
+  const demoSeedMarker = db.prepare("SELECT 1 FROM app_data WHERE key_name='demoAccountsSeeded'").get();
+  if (!demoSeedMarker) {
+    const demoUsers = [
+      ['Demo Client', 'client@flx.local', 'client123', 'Client', '+255700000001', 'University scholar (hostel)'],
+      ['Demo Agent', 'agent@flx.local', 'agent123', 'Agent', '+255700000002', ''],
+      ['Demo Owner', 'owner@flx.local', 'owner123', 'Owner', '+255700000003', ''],
+      ['Demo Investor', 'investor@flx.local', 'investor123', 'Investor', '+255700000004', ''],
+    ];
+    const insertDemoUser = db.prepare(`
+      INSERT OR IGNORE INTO users (name, email, password, role, phone, client_category, approval_status, approved_at, is_demo)
+      VALUES (?, ?, ?, ?, ?, ?, 'Approved', CURRENT_TIMESTAMP, 1)
+    `);
+    const insertDemoUsers = db.transaction((users) => {
+      for (const [name, email, password, role, phone, clientCategory] of users) {
+        insertDemoUser.run(name, email, hashPasswordSync(password), role, phone, clientCategory);
+      }
+    });
+    insertDemoUsers(demoUsers);
+    db.prepare("UPDATE users SET is_demo=1 WHERE email IN ('client@flx.local','agent@flx.local','owner@flx.local','investor@flx.local')").run();
+    db.prepare("INSERT INTO app_data (key_name,key_value) VALUES ('demoAccountsSeeded','true')").run();
+  }
 
   const savedCount = db.prepare('SELECT COUNT(*) AS count FROM saved_listings WHERE user_email = ?').get('admin@flx.local');
   if (!savedCount.count) {
@@ -684,12 +1016,15 @@ const createTables = () => {
 };
 
 createTables();
+ensureUserWorkflowColumns();
 ensureListingLocationColumns();
+ensurePropertyWorkflowColumns();
 removeLegacyOpsFixtures();
 removeLegacyAgentFixtures();
 
 export const createApp = () => {
   const app = express();
+  app.set('trust proxy', 1);
   const distDir = path.join(__dirname, 'dist');
 
   app.use(express.json({ limit: '2mb' }));
@@ -722,12 +1057,12 @@ export const createApp = () => {
   });
 
   const normalizeListingRow = (row) => {
-    const lat = Number(row?.lat ?? row?.latitude ?? -6.7924);
-    const lng = Number(row?.lng ?? row?.longitude ?? 39.2083);
+    const lat = row?.lat ?? row?.latitude;
+    const lng = row?.lng ?? row?.longitude;
     return {
       ...row,
-      lat: Number.isFinite(lat) ? lat : -6.7924,
-      lng: Number.isFinite(lng) ? lng : 39.2083,
+      lat: lat == null || lat === '' ? null : Number.isFinite(Number(lat)) ? Number(lat) : null,
+      lng: lng == null || lng === '' ? null : Number.isFinite(Number(lng)) ? Number(lng) : null,
     };
   };
 
@@ -739,14 +1074,602 @@ export const createApp = () => {
     next();
   };
 
-  app.get('/api/properties', (_req, res) => {
-    const rows = db.prepare('SELECT * FROM listings ORDER BY id ASC').all().map(normalizeListingRow);
+  const requireAdmin = (req, res, next) => {
+    const session = getSessionUser(req);
+    if (!session) return res.status(401).json({ error: 'Sign in with an Admin account.' });
+    if (session.role !== 'Admin') return res.status(403).json({ error: 'Only Admins can perform this action.' });
+    req.adminActor = session;
+    next();
+  };
+
+  app.get('/api/admin/accounts', requireAdmin, async (_req, res) => {
+    try {
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        const [accounts, events] = await Promise.all([
+          client.query('SELECT id,name,email,role,phone,profile_picture,client_category,approval_status,approved_at,last_login_at,is_demo,created_at FROM users ORDER BY created_at DESC,id DESC'),
+          client.query(`SELECT e.id,e.event_type,e.created_at,u.id AS user_id,u.name,u.email,u.role,u.client_category FROM login_events e JOIN users u ON u.id=e.user_id ORDER BY e.created_at DESC`),
+        ]);
+        return res.json({ accounts: accounts.rows, events: events.rows });
+      }
+      const accounts = db.prepare('SELECT id,name,email,role,phone,profile_picture,client_category,approval_status,approved_at,last_login_at,is_demo,created_at FROM users ORDER BY created_at DESC,id DESC').all();
+      const events = db.prepare(`SELECT e.id,e.event_type,e.created_at,e.user_id,u.name,u.email,u.role,u.client_category FROM login_events e JOIN users u ON u.id=e.user_id ORDER BY e.created_at DESC`).all();
+      return res.json({ accounts, events });
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unable to load account records.' });
+    }
+  });
+
+  app.delete('/api/admin/accounts/:id', requireAdmin, async (req, res) => {
+    const userId = Number(req.params.id);
+    if (!Number.isInteger(userId) || userId === Number(req.adminActor.userId)) return res.status(400).json({ error: 'Select a different demo account.' });
+    try {
+      let result;
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        result = await client.query("DELETE FROM users WHERE id=$1 AND is_demo=TRUE AND role <> 'Admin' RETURNING id", [userId]);
+        if (!result.rows.length) return res.status(404).json({ error: 'Demo account not found.' });
+      } else {
+        result = db.prepare("DELETE FROM users WHERE id=? AND is_demo=1 AND role <> 'Admin'").run(userId);
+        if (!result.changes) return res.status(404).json({ error: 'Demo account not found.' });
+      }
+      return res.json({ ok: true, deletedId: userId });
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Demo account could not be deleted.' });
+    }
+  });
+
+  app.patch('/api/admin/accounts/:id/approval', requireAdmin, async (req, res) => {
+    const decision = String(req.body?.decision || '');
+    if (!['Approved', 'Rejected'].includes(decision)) return res.status(400).json({ error: 'Decision must be Approved or Rejected.' });
+    const now = new Date().toISOString();
+    try {
+      let account;
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        const result = await client.query(`
+          UPDATE users SET approval_status=$1,approved_by=$2,approved_at=$3
+          WHERE id=$4 AND role IN ('Owner','Agent') AND approval_status='Pending'
+          RETURNING id,name,email,role,client_category,approval_status,approved_at
+        `, [decision, req.adminActor.userId, now, req.params.id]);
+        account = result.rows[0];
+        if (account) await client.query('INSERT INTO login_events (user_id,event_type,created_at) VALUES ($1,$2,$3)', [account.id, decision === 'Approved' ? 'account_approved' : 'account_rejected', now]);
+      } else {
+        const result = db.prepare(`
+          UPDATE users SET approval_status=?,approved_by=?,approved_at=?
+          WHERE id=? AND role IN ('Owner','Agent') AND approval_status='Pending'
+        `).run(decision, req.adminActor.userId, now, Number(req.params.id));
+        account = result.changes ? db.prepare('SELECT id,name,email,role,client_category,approval_status,approved_at FROM users WHERE id=?').get(Number(req.params.id)) : null;
+        if (account) db.prepare('INSERT INTO login_events (user_id,event_type,created_at) VALUES (?,?,?)').run(account.id, decision === 'Approved' ? 'account_approved' : 'account_rejected', now);
+      }
+      if (!account) return res.status(404).json({ error: 'Pending Agent or Owner application not found.' });
+      return res.json({ ok: true, account });
+    } catch (error) {
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'Unable to update account approval.' });
+    }
+  });
+
+  const requirePropertyAccess = (req, res, next) => {
+    const session = getSessionUser(req);
+    if (!session) return res.status(401).json({ error: 'Sign in to manage property records.' });
+    if (!['Owner', 'Agent', 'Admin'].includes(session.role)) return res.status(403).json({ error: 'An Owner, Agent, or Admin account is required.' });
+    req.propertyActor = session;
+    next();
+  };
+
+  const parseJsonList = (value) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value !== 'string') return [];
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const normalizePropertyRecord = (row) => {
+    const normalized = normalizeListingRow(row);
+    const images = parseJsonList(row.images_json ?? row.images);
+    if (!images.length && row.image) images.push(row.image);
+    const videos = parseJsonList(row.videos_json ?? row.videos);
+    if (!videos.length && row.video_url) videos.push(row.video_url);
+    return {
+      ...normalized,
+      image: row.image || images[0] || '',
+      video_url: row.video_url || videos[0] || '',
+      features: parseJsonList(row.features_json ?? row.features),
+      images,
+      videos,
+    };
+  };
+
+  const getPropertyById = async (id) => {
+    if (isPostgresMode) {
+      const client = await getPostgresClient();
+      const result = await client.query('SELECT * FROM listings WHERE id = $1 AND deleted_at IS NULL', [id]);
+      return result.rows[0] || null;
+    }
+    return db.prepare('SELECT * FROM listings WHERE id = ? AND deleted_at IS NULL').get(Number(id)) || null;
+  };
+
+  const actorCanEditProperty = (actor, property) => actor.role === 'Admin'
+    || (actor.role === 'Owner' && Number(property.owner_id) === Number(actor.userId))
+    || (actor.role === 'Agent' && (Number(property.agent_id) === Number(actor.userId) || Number(property.created_by) === Number(actor.userId)));
+
+  const normalizePropertyInput = (body, existing = {}) => {
+    const title = String(body.title ?? existing.title ?? '').trim();
+    const city = String(body.city ?? existing.city ?? '').trim();
+    const price = String(body.price ?? existing.price ?? '').trim();
+    const period = String(body.period ?? existing.period ?? '').trim();
+    const transactionType = String(body.transaction_type ?? existing.transaction_type ?? '').trim();
+    const propertyKind = String(body.property_kind ?? existing.property_kind ?? '').trim();
+    if (!title || !city || !price || !transactionType || !propertyKind) {
+      throw Object.assign(new Error('Title, location, price, transaction type, and property kind are required.'), { status: 400 });
+    }
+    if (!['Rent', 'Sale'].includes(transactionType)) throw Object.assign(new Error('Transaction type must be Rent or Sale.'), { status: 400 });
+    if (!['Hostel', 'Apartment', 'Frame', 'House', 'Land', 'Commercial', 'Other'].includes(propertyKind)) {
+      throw Object.assign(new Error('Choose a supported property kind.'), { status: 400 });
+    }
+    const parseUrls = (value, label) => {
+      const urls = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/\r?\n/) : [];
+      const result = [...new Set(urls.map((url) => String(url).trim()).filter(Boolean))];
+      if (result.length > 40) throw Object.assign(new Error(`${label} supports up to 40 links.`), { status: 400 });
+      for (const url of result) {
+        try {
+          if (!['http:', 'https:'].includes(new URL(url).protocol)) throw new Error('scheme');
+        } catch {
+          throw Object.assign(new Error(`Every ${label.toLowerCase()} entry must be an absolute HTTP or HTTPS URL.`), { status: 400 });
+        }
+      }
+      return result;
+    };
+    const rawFeatures = Array.isArray(body.features) ? body.features : typeof body.features === 'string' ? body.features.split(',') : parseJsonList(existing.features_json);
+    const features = [...new Set(rawFeatures.map((feature) => String(feature).trim()).filter(Boolean))];
+    if (features.length > 100 || features.some((feature) => feature.length > 100)) {
+      throw Object.assign(new Error('Add up to 100 features, each up to 100 characters.'), { status: 400 });
+    }
+    const lat = body.lat === '' || body.lat == null ? null : Number(body.lat);
+    const lng = body.lng === '' || body.lng == null ? null : Number(body.lng);
+    if ((lat !== null && !Number.isFinite(lat)) || (lng !== null && !Number.isFinite(lng))) {
+      throw Object.assign(new Error('Map coordinates must be valid numbers.'), { status: 400 });
+    }
+    return {
+      title,
+      city,
+      price,
+      period,
+      transaction_type: transactionType,
+      property_kind: propertyKind,
+      description: String(body.description ?? existing.description ?? '').trim(),
+      unit_label: String(body.unit_label ?? existing.unit_label ?? '').trim(),
+      bedrooms: Math.max(0, Math.min(100, Number.parseInt(body.bedrooms ?? existing.bedrooms ?? 0, 10) || 0)),
+      bathrooms: Math.max(0, Math.min(100, Number(body.bathrooms ?? existing.bathrooms ?? 0) || 0)),
+      lat,
+      lng,
+      features,
+      images: parseUrls(body.images ?? existing.images_json, 'Images'),
+      videos: parseUrls(body.videos ?? existing.videos_json, 'Videos'),
+      badge: String(body.badge ?? existing.badge ?? propertyKind).trim(),
+      tag: String(body.tag ?? existing.tag ?? '').trim(),
+      verification: String(body.verification ?? existing.verification ?? '').trim(),
+    };
+  };
+
+  const validateUserRole = async (userId, role) => {
+    if (!userId) return false;
+    if (isPostgresMode) {
+      const client = await getPostgresClient();
+      const result = await client.query('SELECT 1 FROM users WHERE id = $1 AND role = $2', [userId, role]);
+      return result.rowCount > 0;
+    }
+    return Boolean(db.prepare('SELECT 1 FROM users WHERE id = ? AND role = ?').get(userId, role));
+  };
+
+  const listPropertiesForActor = async (actor) => {
+    if (isPostgresMode) {
+      const client = await getPostgresClient();
+      let result;
+      if (actor.role === 'Admin') result = await client.query('SELECT * FROM listings WHERE deleted_at IS NULL ORDER BY updated_at DESC, id DESC');
+      else if (actor.role === 'Owner') result = await client.query('SELECT * FROM listings WHERE deleted_at IS NULL AND owner_id = $1 ORDER BY updated_at DESC, id DESC', [actor.userId]);
+      else result = await client.query('SELECT * FROM listings WHERE deleted_at IS NULL AND (agent_id = $1 OR created_by = $1) ORDER BY updated_at DESC, id DESC', [actor.userId]);
+      return result.rows.map(normalizePropertyRecord);
+    }
+    const rows = actor.role === 'Admin'
+      ? db.prepare('SELECT * FROM listings WHERE deleted_at IS NULL ORDER BY updated_at DESC, id DESC').all()
+      : actor.role === 'Owner'
+        ? db.prepare('SELECT * FROM listings WHERE deleted_at IS NULL AND owner_id = ? ORDER BY updated_at DESC, id DESC').all(actor.userId)
+        : db.prepare('SELECT * FROM listings WHERE deleted_at IS NULL AND (agent_id = ? OR created_by = ?) ORDER BY updated_at DESC, id DESC').all(actor.userId, actor.userId);
+    return rows.map(normalizePropertyRecord);
+  };
+
+  const appendUploadedMedia = async (properties) => {
+    if (!properties.length) return properties;
+    const ids = properties.map((property) => property.id);
+    let mediaRows;
+    if (isPostgresMode) {
+      const client = await getPostgresClient();
+      const result = await client.query('SELECT id, property_id, media_type FROM property_media WHERE property_id = ANY($1::int[]) ORDER BY created_at ASC', [ids]);
+      mediaRows = result.rows;
+    } else {
+      const placeholders = ids.map(() => '?').join(',');
+      mediaRows = db.prepare(`SELECT id, property_id, media_type FROM property_media WHERE property_id IN (${placeholders}) ORDER BY created_at ASC`).all(...ids);
+    }
+    const byProperty = new Map();
+    for (const media of mediaRows) {
+      const current = byProperty.get(Number(media.property_id)) || { images: [], videos: [] };
+      current[media.media_type === 'video' ? 'videos' : 'images'].push(`/api/properties/${media.property_id}/media/${media.id}`);
+      byProperty.set(Number(media.property_id), current);
+    }
+    return properties.map((raw) => {
+      const property = normalizePropertyRecord(raw);
+      const uploaded = byProperty.get(Number(property.id)) || { images: [], videos: [] };
+      const images = [...new Set([...(property.images || []), ...uploaded.images])];
+      const videos = [...new Set([...(property.videos || []), ...uploaded.videos])];
+      return { ...property, images, videos, image: images[0] || '', video_url: videos[0] || '' };
+    });
+  };
+
+  app.get('/api/properties', async (_req, res) => {
+    if (isPostgresMode) {
+      try {
+        const client = await getPostgresClient();
+        const result = await client.query("SELECT * FROM listings WHERE approval_status = 'Approved' AND deleted_at IS NULL ORDER BY id ASC");
+        return res.json({ properties: await appendUploadedMedia(result.rows) });
+      } catch (error) {
+        return res.status(503).json({ error: error instanceof Error ? error.message : 'Live inventory is unavailable.' });
+      }
+    }
+    const rows = await appendUploadedMedia(db.prepare("SELECT * FROM listings WHERE approval_status = 'Approved' AND deleted_at IS NULL ORDER BY id ASC").all());
     res.json({ properties: rows });
   });
 
-  app.post('/api/properties/:propertyId/requests', (req, res) => {
+  app.get('/api/property-workbench', requirePropertyAccess, async (req, res) => {
+    try {
+      const properties = await appendUploadedMedia(await listPropertiesForActor(req.propertyActor));
+      res.json({ properties, actor: { id: req.propertyActor.userId, name: req.propertyActor.name, role: req.propertyActor.role } });
+    } catch (error) {
+      res.status(503).json({ error: error instanceof Error ? error.message : 'Property records are unavailable.' });
+    }
+  });
+
+  app.get('/api/property-workbench/users', requirePropertyAccess, async (req, res) => {
+    try {
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        const allowedRoles = req.propertyActor.role === 'Owner' ? ['Agent'] : ['Owner', 'Agent'];
+        const result = await client.query('SELECT id, name, role FROM users WHERE role = ANY($1::text[]) ORDER BY name ASC', [allowedRoles]);
+        return res.json({ owners: result.rows.filter((user) => user.role === 'Owner'), agents: result.rows.filter((user) => user.role === 'Agent') });
+      }
+      const roles = req.propertyActor.role === 'Owner' ? ['Agent'] : ['Owner', 'Agent'];
+      const users = db.prepare(`SELECT id, name, role FROM users WHERE role IN (${roles.map(() => '?').join(',')}) ORDER BY name ASC`).all(...roles);
+      res.json({ owners: users.filter((user) => user.role === 'Owner'), agents: users.filter((user) => user.role === 'Agent') });
+    } catch (error) {
+      res.status(503).json({ error: error instanceof Error ? error.message : 'User records are unavailable.' });
+    }
+  });
+
+  app.post('/api/property-workbench/:id/media', requirePropertyAccess, express.raw({ type: '*/*', limit: '80mb' }), async (req, res) => {
+    try {
+      const property = await getPropertyById(req.params.id);
+      if (!property) return res.status(404).json({ error: 'Property record not found.' });
+      if (!actorCanEditProperty(req.propertyActor, property)) return res.status(403).json({ error: 'You do not have permission to add media to this property.' });
+      if (!Buffer.isBuffer(req.body) || req.body.length === 0) return res.status(400).json({ error: 'Choose a non-empty media file.' });
+      const mediaType = String(req.get('x-media-kind') || '');
+      const mimeType = String(req.get('content-type') || '').toLowerCase().split(';')[0].trim();
+      const supported = mediaType === 'photo'
+        ? ['image/jpeg', 'image/png', 'image/webp', 'image/avif'].includes(mimeType)
+        : mediaType === 'video' && ['video/mp4', 'video/webm', 'video/quicktime'].includes(mimeType);
+      if (!supported) return res.status(415).json({ error: 'Photos must be JPG, PNG, WebP, or AVIF; videos must be MP4, WebM, or MOV.' });
+      const maxBytes = mediaType === 'photo' ? 15 * 1024 * 1024 : 70 * 1024 * 1024;
+      if (req.body.length > maxBytes) return res.status(413).json({ error: `This ${mediaType} exceeds the ${mediaType === 'photo' ? '15 MB' : '70 MB'} limit.` });
+      const mediaId = crypto.randomUUID();
+      const originalName = decodeURIComponent(String(req.get('x-file-name') || `property-${mediaType}`)).replace(/[\\/\r\n\0]/g, '').slice(0, 255) || `property-${mediaType}`;
+      const now = new Date().toISOString();
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        await client.query('BEGIN');
+        try {
+          await client.query('INSERT INTO property_media (id,property_id,media_type,mime_type,original_name,data,byte_size,created_by,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [mediaId, req.params.id, mediaType, mimeType, originalName, req.body, req.body.length, req.propertyActor.userId, now]);
+          await client.query("UPDATE listings SET approval_status='Pending',status='Pending',approved_by=NULL,approved_at=NULL,updated_at=$1 WHERE id=$2", [now, req.params.id]);
+          await client.query('INSERT INTO property_history (id,property_id,actor_id,action,changes,created_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6)', [crypto.randomUUID(), req.params.id, req.propertyActor.userId, 'media_added', JSON.stringify({ media_id: mediaId, media_type: mediaType, original_name: originalName, byte_size: req.body.length }), now]);
+          await client.query('COMMIT');
+        } catch (error) { await client.query('ROLLBACK'); throw error; }
+      } else {
+        db.transaction(() => {
+          db.prepare('INSERT INTO property_media (id,property_id,media_type,mime_type,original_name,data,byte_size,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)').run(mediaId, Number(req.params.id), mediaType, mimeType, originalName, req.body, req.body.length, Number(req.propertyActor.userId), now);
+          db.prepare("UPDATE listings SET approval_status='Pending',status='Pending',approved_by=NULL,approved_at=NULL,updated_at=? WHERE id=?").run(now, Number(req.params.id));
+          db.prepare('INSERT INTO property_history (id,property_id,actor_id,action,changes_json,created_at) VALUES (?,?,?,?,?,?)').run(crypto.randomUUID(), req.params.id, req.propertyActor.userId, 'media_added', JSON.stringify({ media_id: mediaId, media_type: mediaType, original_name: originalName, byte_size: req.body.length }), now);
+        })();
+      }
+      res.status(201).json({ ok: true, media: { id: mediaId, media_type: mediaType, original_name: originalName, url: `/api/properties/${req.params.id}/media/${mediaId}` }, approval_status: 'Pending' });
+    } catch (error) {
+      res.status(error?.status || 500).json({ error: error instanceof Error ? error.message : 'Media could not be stored.' });
+    }
+  });
+
+  app.delete('/api/property-workbench/:id/media/:mediaId', requirePropertyAccess, async (req, res) => {
+    try {
+      const property = await getPropertyById(req.params.id);
+      if (!property) return res.status(404).json({ error: 'Property record not found.' });
+      if (!actorCanEditProperty(req.propertyActor, property)) return res.status(403).json({ error: 'You do not have permission to remove media from this property.' });
+      const now = new Date().toISOString();
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        await client.query('BEGIN');
+        try {
+          const deleted = await client.query('DELETE FROM property_media WHERE id=$1 AND property_id=$2 RETURNING id', [req.params.mediaId, req.params.id]);
+          if (!deleted.rowCount) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Uploaded media not found.' }); }
+          await client.query("UPDATE listings SET approval_status='Pending',status='Pending',approved_by=NULL,approved_at=NULL,updated_at=$1 WHERE id=$2", [now, req.params.id]);
+          await client.query('INSERT INTO property_history (id,property_id,actor_id,action,changes,created_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6)', [crypto.randomUUID(), req.params.id, req.propertyActor.userId, 'media_removed', JSON.stringify({ media_id: req.params.mediaId }), now]);
+          await client.query('COMMIT');
+        } catch (error) { await client.query('ROLLBACK'); throw error; }
+      } else {
+        const deleted = db.prepare('DELETE FROM property_media WHERE id=? AND property_id=?').run(req.params.mediaId, Number(req.params.id));
+        if (!deleted.changes) return res.status(404).json({ error: 'Uploaded media not found.' });
+        db.transaction(() => {
+          db.prepare("UPDATE listings SET approval_status='Pending',status='Pending',approved_by=NULL,approved_at=NULL,updated_at=? WHERE id=?").run(now, Number(req.params.id));
+          db.prepare('INSERT INTO property_history (id,property_id,actor_id,action,changes_json,created_at) VALUES (?,?,?,?,?,?)').run(crypto.randomUUID(), req.params.id, req.propertyActor.userId, 'media_removed', JSON.stringify({ media_id: req.params.mediaId }), now);
+        })();
+      }
+      res.json({ ok: true, approval_status: 'Pending' });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Media could not be removed.' });
+    }
+  });
+
+  app.get('/api/properties/:propertyId/media/:mediaId', async (req, res) => {
+    try {
+      let property;
+      let media;
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        const result = await client.query('SELECT p.approval_status,p.deleted_at,m.mime_type,m.original_name,m.data,m.media_type FROM listings p JOIN property_media m ON m.property_id=p.id WHERE p.id=$1 AND m.id=$2', [req.params.propertyId, req.params.mediaId]);
+        property = result.rows[0];
+        media = property;
+      } else {
+        media = db.prepare('SELECT p.approval_status,p.deleted_at,m.mime_type,m.original_name,m.data,m.media_type FROM listings p JOIN property_media m ON m.property_id=p.id WHERE p.id=? AND m.id=?').get(Number(req.params.propertyId), req.params.mediaId);
+        property = media;
+      }
+      if (!property || property.deleted_at || property.approval_status !== 'Approved') return res.sendStatus(404);
+      res.setHeader('Content-Type', media.mime_type);
+      res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(media.original_name)}`);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'public, max-age=3600');
+      res.send(media.data);
+    } catch {
+      res.sendStatus(404);
+    }
+  });
+
+  app.get('/api/property-workbench/:id/history', requirePropertyAccess, async (req, res) => {
+    try {
+      const property = await getPropertyById(req.params.id);
+      if (!property) return res.status(404).json({ error: 'Property record not found.' });
+      if (!actorCanEditProperty(req.propertyActor, property)) return res.status(403).json({ error: 'You do not have access to this property record.' });
+      let history;
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        const result = await client.query('SELECT id, property_id, actor_id, action, changes AS changes_json, created_at FROM property_history WHERE property_id = $1 ORDER BY created_at DESC', [req.params.id]);
+        history = result.rows.map((row) => ({ ...row, changes: row.changes_json }));
+      } else {
+        history = db.prepare('SELECT id, property_id, actor_id, action, changes_json, created_at FROM property_history WHERE property_id = ? ORDER BY created_at DESC').all(req.params.id)
+          .map((row) => ({ ...row, changes: parseJsonList(row.changes_json) }));
+      }
+      res.json({ history });
+    } catch (error) {
+      res.status(503).json({ error: error instanceof Error ? error.message : 'Property history is unavailable.' });
+    }
+  });
+
+  app.post('/api/property-workbench', requirePropertyAccess, async (req, res) => {
+    const actor = req.propertyActor;
+    let property;
+    try {
+      property = normalizePropertyInput(req.body || {});
+      let ownerId = actor.role === 'Owner' ? Number(actor.userId) : (req.body?.owner_id ? Number(req.body.owner_id) : null);
+      let agentId = actor.role === 'Agent' ? Number(actor.userId) : (req.body?.agent_id ? Number(req.body.agent_id) : null);
+      if (ownerId && !(await validateUserRole(ownerId, 'Owner'))) return res.status(400).json({ error: 'Select a valid Owner account.' });
+      if (agentId && !(await validateUserRole(agentId, 'Agent'))) return res.status(400).json({ error: 'Select a valid Agent account.' });
+      if (actor.role === 'Owner' && ownerId !== Number(actor.userId)) return res.status(403).json({ error: 'Owners may create records only for their own account.' });
+      if (actor.role === 'Agent' && agentId !== Number(actor.userId)) return res.status(403).json({ error: 'Agent assignments are recorded to the signed-in agent.' });
+
+      const now = new Date().toISOString();
+      const image = property.images[0] || '';
+      let id;
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        await client.query('BEGIN');
+        try {
+          const result = await client.query(`
+            INSERT INTO listings (title, city, price, period, image, badge, tag, verification, status, description, lat, lng, property_kind, transaction_type, approval_status, owner_id, agent_id, created_by, unit_label, bedrooms, bathrooms, features_json, images_json, videos_json, updated_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'Pending',$9,$10,$11,$12,$13,'Pending',$14,$15,$16,$17,$18,$19,$20::jsonb,$21::jsonb,$22::jsonb,$23)
+            RETURNING *
+          `, [property.title, property.city, property.price, property.period || (property.transaction_type === 'Rent' ? 'per month' : 'For sale'), image, property.badge || property.property_kind, property.tag, property.verification, property.description, property.lat, property.lng, property.property_kind, property.transaction_type, ownerId, agentId, actor.userId, property.unit_label, property.bedrooms, property.bathrooms, JSON.stringify(property.features), JSON.stringify(property.images), JSON.stringify(property.videos), now]);
+          id = result.rows[0].id;
+          await client.query('INSERT INTO property_history (id, property_id, actor_id, action, changes, created_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6)', [crypto.randomUUID(), id, actor.userId, 'created', JSON.stringify({ approval_status: 'Pending', owner_id: ownerId, agent_id: agentId }), now]);
+          await client.query('COMMIT');
+          return res.status(201).json({ ok: true, property: normalizePropertyRecord(result.rows[0]) });
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      }
+      const nextId = db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS nextId FROM listings').get().nextId;
+      const create = db.transaction(() => {
+        db.prepare(`
+          INSERT INTO listings (id,title,city,price,period,image,badge,tag,verification,status,description,lat,lng,property_kind,transaction_type,approval_status,owner_id,agent_id,created_by,unit_label,bedrooms,bathrooms,features_json,images_json,videos_json,updated_at)
+          VALUES (@id,@title,@city,@price,@period,@image,@badge,@tag,@verification,'Pending',@description,@lat,@lng,@property_kind,@transaction_type,'Pending',@owner_id,@agent_id,@created_by,@unit_label,@bedrooms,@bathrooms,@features_json,@images_json,@videos_json,@updated_at)
+        `).run({ id: nextId, ...property, period: property.period || (property.transaction_type === 'Rent' ? 'per month' : 'For sale'), image, owner_id: ownerId, agent_id: agentId, created_by: Number(actor.userId), features_json: JSON.stringify(property.features), images_json: JSON.stringify(property.images), videos_json: JSON.stringify(property.videos), updated_at: now });
+        db.prepare('INSERT INTO property_history (id,property_id,actor_id,action,changes_json,created_at) VALUES (?,?,?,?,?,?)')
+          .run(crypto.randomUUID(), nextId, actor.userId, 'created', JSON.stringify({ approval_status: 'Pending', owner_id: ownerId, agent_id: agentId }), now);
+      });
+      create();
+      const saved = db.prepare('SELECT * FROM listings WHERE id = ?').get(nextId);
+      res.status(201).json({ ok: true, property: normalizePropertyRecord(saved) });
+    } catch (error) {
+      res.status(error?.status || 500).json({ error: error instanceof Error ? error.message : 'Property record could not be created.' });
+    }
+  });
+
+  app.put('/api/property-workbench/:id', requirePropertyAccess, async (req, res) => {
+    const actor = req.propertyActor;
+    try {
+      const current = await getPropertyById(req.params.id);
+      if (!current) return res.status(404).json({ error: 'Property record not found.' });
+      if (!actorCanEditProperty(actor, current)) return res.status(403).json({ error: 'You do not have permission to edit this property record.' });
+      const property = normalizePropertyInput(req.body || {}, current);
+      let ownerId = Number(current.owner_id) || null;
+      let agentId = Number(current.agent_id) || null;
+      if (actor.role === 'Admin') {
+        ownerId = req.body?.owner_id === '' || req.body?.owner_id == null ? null : Number(req.body.owner_id);
+        agentId = req.body?.agent_id === '' || req.body?.agent_id == null ? null : Number(req.body.agent_id);
+      } else if (actor.role === 'Agent' && req.body?.owner_id !== undefined) {
+        ownerId = req.body.owner_id === '' || req.body.owner_id == null ? null : Number(req.body.owner_id);
+      } else if (actor.role === 'Owner' && req.body?.agent_id !== undefined) {
+        agentId = req.body.agent_id === '' || req.body.agent_id == null ? null : Number(req.body.agent_id);
+      }
+      if (ownerId && !(await validateUserRole(ownerId, 'Owner'))) return res.status(400).json({ error: 'Select a valid Owner account.' });
+      if (agentId && !(await validateUserRole(agentId, 'Agent'))) return res.status(400).json({ error: 'Select a valid Agent account.' });
+      const now = new Date().toISOString();
+      const image = property.images[0] || '';
+      const prior = normalizePropertyRecord(current);
+      const changes = Object.fromEntries(['title','city','price','period','property_kind','transaction_type','description','unit_label','bedrooms','bathrooms','features','images','videos','owner_id','agent_id']
+        .filter((field) => JSON.stringify(prior[field]) !== JSON.stringify(field === 'features' ? property.features : field === 'images' ? property.images : field === 'videos' ? property.videos : field === 'owner_id' ? ownerId : field === 'agent_id' ? agentId : property[field]))
+        .map((field) => [field, { from: prior[field] ?? null, to: field === 'features' ? property.features : field === 'images' ? property.images : field === 'videos' ? property.videos : field === 'owner_id' ? ownerId : field === 'agent_id' ? agentId : property[field] }]));
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        await client.query('BEGIN');
+        try {
+          const result = await client.query(`
+            UPDATE listings SET title=$1,city=$2,price=$3,period=$4,image=$5,badge=$6,tag=$7,verification=$8,status='Pending',description=$9,lat=$10,lng=$11,property_kind=$12,transaction_type=$13,approval_status='Pending',owner_id=$14,agent_id=$15,unit_label=$16,bedrooms=$17,bathrooms=$18,features_json=$19::jsonb,images_json=$20::jsonb,videos_json=$21::jsonb,approval_note='',approved_by=NULL,approved_at=NULL,updated_at=$22 WHERE id=$23 RETURNING *
+          `, [property.title, property.city, property.price, property.period || (property.transaction_type === 'Rent' ? 'per month' : 'For sale'), image, property.badge || property.property_kind, property.tag, property.verification, property.description, property.lat, property.lng, property.property_kind, property.transaction_type, ownerId, agentId, property.unit_label, property.bedrooms, property.bathrooms, JSON.stringify(property.features), JSON.stringify(property.images), JSON.stringify(property.videos), now, req.params.id]);
+          await client.query('INSERT INTO property_history (id,property_id,actor_id,action,changes,created_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6)', [crypto.randomUUID(), req.params.id, actor.userId, 'updated', JSON.stringify(changes), now]);
+          await client.query('COMMIT');
+          return res.json({ ok: true, property: normalizePropertyRecord(result.rows[0]) });
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      }
+      const update = db.transaction(() => {
+        db.prepare(`UPDATE listings SET title=?,city=?,price=?,period=?,image=?,badge=?,tag=?,verification=?,status='Pending',description=?,lat=?,lng=?,property_kind=?,transaction_type=?,approval_status='Pending',owner_id=?,agent_id=?,unit_label=?,bedrooms=?,bathrooms=?,features_json=?,images_json=?,videos_json=?,approval_note='',approved_by=NULL,approved_at=NULL,updated_at=? WHERE id=?`)
+          .run(property.title, property.city, property.price, property.period || (property.transaction_type === 'Rent' ? 'per month' : 'For sale'), image, property.badge || property.property_kind, property.tag, property.verification, property.description, property.lat, property.lng, property.property_kind, property.transaction_type, ownerId, agentId, property.unit_label, property.bedrooms, property.bathrooms, JSON.stringify(property.features), JSON.stringify(property.images), JSON.stringify(property.videos), now, Number(req.params.id));
+        db.prepare('INSERT INTO property_history (id,property_id,actor_id,action,changes_json,created_at) VALUES (?,?,?,?,?,?)')
+          .run(crypto.randomUUID(), req.params.id, actor.userId, 'updated', JSON.stringify(changes), now);
+      });
+      update();
+      return res.json({ ok: true, property: normalizePropertyRecord(db.prepare('SELECT * FROM listings WHERE id = ?').get(Number(req.params.id))) });
+    } catch (error) {
+      res.status(error?.status || 500).json({ error: error instanceof Error ? error.message : 'Property record could not be updated.' });
+    }
+  });
+
+  app.delete('/api/property-workbench/:id', requirePropertyAccess, async (req, res) => {
+    try {
+      const current = await getPropertyById(req.params.id);
+      if (!current) return res.status(404).json({ error: 'Property record not found.' });
+      if (!actorCanEditProperty(req.propertyActor, current)) return res.status(403).json({ error: 'You do not have permission to delete this property record.' });
+      const now = new Date().toISOString();
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        await client.query('BEGIN');
+        try {
+          await client.query("UPDATE listings SET deleted_at=$1,approval_status='Withdrawn',updated_at=$1 WHERE id=$2", [now, req.params.id]);
+          await client.query('INSERT INTO property_history (id,property_id,actor_id,action,changes,created_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6)', [crypto.randomUUID(), req.params.id, req.propertyActor.userId, 'deleted', JSON.stringify({ deleted_at: now }), now]);
+          await client.query('COMMIT');
+        } catch (error) { await client.query('ROLLBACK'); throw error; }
+      } else {
+        db.transaction(() => {
+          db.prepare("UPDATE listings SET deleted_at=?,approval_status='Withdrawn',updated_at=? WHERE id=?").run(now, now, Number(req.params.id));
+          db.prepare('INSERT INTO property_history (id,property_id,actor_id,action,changes_json,created_at) VALUES (?,?,?,?,?,?)').run(crypto.randomUUID(), req.params.id, req.propertyActor.userId, 'deleted', JSON.stringify({ deleted_at: now }), now);
+        })();
+      }
+      res.json({ ok: true, id: String(req.params.id), approval_status: 'Withdrawn' });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Property record could not be withdrawn.' });
+    }
+  });
+
+  app.patch('/api/property-workbench/:id/approval', requirePropertyAccess, async (req, res) => {
+    if (req.propertyActor.role !== 'Admin') return res.status(403).json({ error: 'Only an Admin may approve property details.' });
+    const decision = String(req.body?.decision || '');
+    if (!['Approved', 'Needs_Revision'].includes(decision)) return res.status(400).json({ error: 'Decision must be Approved or Needs_Revision.' });
+    const approvalNote = String(req.body?.note || '').trim();
+    if (decision === 'Needs_Revision' && !approvalNote) return res.status(400).json({ error: 'Add a revision note before returning this listing.' });
+    try {
+      const current = await getPropertyById(req.params.id);
+      if (!current) return res.status(404).json({ error: 'Property record not found.' });
+      const now = new Date().toISOString();
+      const status = decision === 'Approved' ? 'Approved' : 'Needs_Revision';
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        await client.query('BEGIN');
+        try {
+          const result = await client.query('UPDATE listings SET approval_status=$1,status=$2,approval_note=$3,approved_by=$4,approved_at=$5,updated_at=$5 WHERE id=$6 RETURNING *', [decision, status, approvalNote, req.propertyActor.userId, now, req.params.id]);
+          await client.query('INSERT INTO property_history (id,property_id,actor_id,action,changes,created_at) VALUES ($1,$2,$3,$4,$5::jsonb,$6)', [crypto.randomUUID(), req.params.id, req.propertyActor.userId, 'approval', JSON.stringify({ approval_status: decision, note: approvalNote }), now]);
+          await client.query('COMMIT');
+          return res.json({ ok: true, property: normalizePropertyRecord(result.rows[0]) });
+        } catch (error) { await client.query('ROLLBACK'); throw error; }
+      }
+      db.transaction(() => {
+        db.prepare('UPDATE listings SET approval_status=?,status=?,approval_note=?,approved_by=?,approved_at=?,updated_at=? WHERE id=?').run(decision, status, approvalNote, req.propertyActor.userId, now, now, Number(req.params.id));
+        db.prepare('INSERT INTO property_history (id,property_id,actor_id,action,changes_json,created_at) VALUES (?,?,?,?,?,?)').run(crypto.randomUUID(), req.params.id, req.propertyActor.userId, 'approval', JSON.stringify({ approval_status: decision, note: approvalNote }), now);
+      })();
+      res.json({ ok: true, property: normalizePropertyRecord(db.prepare('SELECT * FROM listings WHERE id=?').get(Number(req.params.id))) });
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : 'Approval decision could not be saved.' });
+    }
+  });
+
+  app.post('/api/properties/:propertyId/requests', async (req, res) => {
     const propertyId = Number(req.params.propertyId);
     if (!Number.isInteger(propertyId) || propertyId < 1) return res.status(400).json({ error: 'A valid property ID is required.' });
+    if (isPostgresMode) {
+      const client = await getPostgresClient();
+      const propertyResult = await client.query('SELECT id,title,city,status,price,period,approval_status,deleted_at FROM listings WHERE id=$1', [propertyId]);
+      const property = propertyResult.rows[0];
+      if (!property || property.deleted_at || property.approval_status !== 'Approved') return res.status(404).json({ error: 'This property is not currently published.' });
+      if (/sold|full|unavailable|occupied|leased/i.test(String(property.status))) return res.status(409).json({ error: 'This listing is not accepting requests.' });
+      const body = req.body || {};
+      const clientName = String(body.client_name || '').trim();
+      const email = String(body.client_email || '').trim().toLowerCase();
+      const phone = String(body.client_phone || '').trim();
+      const normalizedPhone = phone.replace(/\D/g, '');
+      const intent = String(body.intent || '');
+      if (!clientName) return res.status(400).json({ error: 'Your name is required.' });
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+      if (!email && normalizedPhone.length < 7) return res.status(400).json({ error: 'Provide an email address or a valid phone number.' });
+      if (!['Buy', 'Rent'].includes(intent)) return res.status(400).json({ error: 'Choose Buy or Rent.' });
+      const rentalListing = !/parcel|land|plot/i.test(`${property.title} ${property.period}`) && /\/(?:mo|sem)|per\s+(?:month|semester|week|night)|\bsemester\b/i.test(`${property.price} ${property.period}`);
+      const expectedIntent = rentalListing ? 'Rent' : 'Buy';
+      if (intent !== expectedIntent) return res.status(400).json({ error: `This listing accepts ${expectedIntent.toLowerCase()} requests only.` });
+      if (body.consent !== true) return res.status(400).json({ error: 'Consent is required before we can share this request with the FLX team.' });
+      const preferredDate = body.preferred_date ? new Date(body.preferred_date) : null;
+      if (preferredDate && !Number.isFinite(preferredDate.getTime())) return res.status(400).json({ error: 'Preferred contact date is invalid.' });
+      const leadId = crypto.randomUUID();
+      const requestId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const note = `Client requested to ${intent.toLowerCase()} ${property.title} (${property.city}). Availability and payment have not been confirmed.`;
+      try {
+        await client.query('BEGIN');
+        const duplicate = await client.query(`SELECT id FROM property_requests WHERE property_id=$1 AND status='Awaiting availability review' AND (($2 <> '' AND client_email=$2) OR ($3 <> '' AND normalized_phone=$3)) LIMIT 1`, [propertyId, email, normalizedPhone]);
+        if (duplicate.rowCount) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'A pending request for this property already exists for these contact details.' });
+        }
+        await client.query(`INSERT INTO crm_leads (id,title,note,client_name,client_email,client_phone,source,intent,property_id,consent,urgency,owner_id,stage,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,'Marketplace',$7,$8,TRUE,'Normal','system','New',$9,$9)`, [leadId, `Property ${intent.toLowerCase()} request: ${property.title}`, note, clientName, email, phone, intent, String(propertyId), now]);
+        await client.query('INSERT INTO crm_activities (id,lead_id,type,body,actor_id,created_at) VALUES ($1,$2,$3,$4,$5,$6)', [crypto.randomUUID(), leadId, 'created', note, 'client-inbound', now]);
+        await client.query('INSERT INTO property_requests (id,property_id,crm_lead_id,client_name,client_email,client_phone,normalized_phone,intent,preferred_date,consent,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10)', [requestId, propertyId, leadId, clientName, email, phone, normalizedPhone, intent, preferredDate?.toISOString() || null, now]);
+        if (preferredDate) await client.query('INSERT INTO crm_tasks (id,lead_id,title,due_at,status,owner_id,created_at,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$7)', [crypto.randomUUID(), leadId, 'Confirm requested property availability and contact client', preferredDate.toISOString(), 'Open', 'system', now]);
+        await client.query('COMMIT');
+        return res.status(201).json({ ok: true, request: { id: requestId, property_id: propertyId, crm_lead_id: leadId, status: 'Awaiting availability review', created_at: now }, payment_enabled: false, message: 'Request recorded for FLX review. This is not a reservation, availability confirmation, or payment.' });
+      } catch (error) {
+        await client.query('ROLLBACK');
+        if (error?.code === '23505') return res.status(409).json({ error: 'A pending request for this property already exists for these contact details.' });
+        return res.status(500).json({ error: error instanceof Error ? error.message : 'Property request could not be saved.' });
+      }
+    }
     const property = db.prepare('SELECT id, title, city, status, price, period FROM listings WHERE id = ?').get(propertyId);
     if (!property) return res.status(404).json({ error: 'This property is no longer in the inventory.' });
     if (/sold|full|unavailable|occupied|leased/i.test(String(property.status))) {
@@ -829,6 +1752,34 @@ export const createApp = () => {
     if (!message) return res.status(400).json({ error: 'A message is required.' });
     if (body.consent !== true) return res.status(400).json({ error: 'Consent is required before FLX can respond.' });
 
+    if (isPostgresMode) {
+      const createPostgresContact = async () => {
+        const client = await getPostgresClient();
+        const leadId = crypto.randomUUID();
+        const now = new Date().toISOString();
+        await client.query('BEGIN');
+        try {
+          const duplicate = await client.query(`SELECT id FROM crm_leads WHERE source='Website contact' AND stage NOT IN ('Won','Lost') AND (($1 <> '' AND LOWER(client_email)=$1) OR ($2 <> '' AND client_phone LIKE $3)) LIMIT 1`, [email, normalizedPhone, normalizedPhone ? `%${normalizedPhone.slice(-9)}` : '']);
+          if (duplicate.rowCount) {
+            await client.query('ROLLBACK');
+            return { duplicate: true };
+          }
+          await client.query(`INSERT INTO crm_leads (id,title,note,client_name,client_email,client_phone,source,intent,consent,urgency,owner_id,stage,created_at,updated_at) VALUES ($1,'Website contact request',$2,$3,$4,$5,'Website contact','General',TRUE,'Normal','system','New',$6,$6)`, [leadId, message, clientName, email, phone, now]);
+          await client.query('INSERT INTO crm_activities (id,lead_id,type,body,actor_id,created_at) VALUES ($1,$2,$3,$4,$5,$6)', [crypto.randomUUID(), leadId, 'created', 'General website contact received with consent.', 'client-inbound', now]);
+          await client.query('COMMIT');
+          return { duplicate: false, id: leadId, created_at: now };
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      };
+      createPostgresContact().then((result) => {
+        if (result.duplicate) return res.status(409).json({ error: 'An unresolved contact request already exists for these contact details.' });
+        res.status(201).json({ ok: true, request: { id: result.id, status: 'Awaiting FLX response', created_at: result.created_at } });
+      }).catch((error) => res.status(500).json({ error: error instanceof Error ? error.message : 'Contact request could not be saved.' }));
+      return;
+    }
+
     const createContact = db.transaction(() => {
       const duplicate = db.prepare(`
         SELECT id FROM crm_leads WHERE source = 'Website contact'
@@ -854,8 +1805,17 @@ export const createApp = () => {
     res.status(201).json({ ok: true, request: { id: result.id, status: 'Awaiting FLX response', created_at: result.created_at } });
   });
 
-  app.get('/api/locations', (_req, res) => {
-    const rows = db.prepare('SELECT id, title, city, lat, lng, price, status, description FROM listings ORDER BY id ASC').all().map(normalizeListingRow);
+  app.get('/api/locations', async (_req, res) => {
+    let rows;
+    if (isPostgresMode) {
+      try {
+        const client = await getPostgresClient();
+        const result = await client.query("SELECT id, title, city, lat, lng, price, status, description FROM listings WHERE approval_status = 'Approved' AND deleted_at IS NULL ORDER BY id ASC");
+        rows = result.rows.map(normalizeListingRow);
+      } catch (error) {
+        return res.status(503).json({ error: error instanceof Error ? error.message : 'Property locations are unavailable.' });
+      }
+    } else rows = db.prepare("SELECT id, title, city, lat, lng, price, status, description FROM listings WHERE approval_status = 'Approved' AND deleted_at IS NULL ORDER BY id ASC").all().map(normalizeListingRow);
     res.json({
       locations: rows.map((row) => ({
         id: row.id,
@@ -1174,7 +2134,7 @@ export const createApp = () => {
     res.status(201).json({ ok: true, dashboard });
   });
 
-  app.get('/api/admin/properties', requireCrmAccess, async (_req, res) => {
+  app.get('/api/admin/properties', requireAdmin, async (_req, res) => {
     if (isPostgresMode) {
       try {
         const client = await getPostgresClient();
@@ -1189,7 +2149,7 @@ export const createApp = () => {
     res.json({ properties: rows });
   });
 
-  app.post('/api/admin/properties', requireCrmAccess, async (req, res) => {
+  app.post('/api/admin/properties', requireAdmin, async (req, res) => {
     const { title, city, price, period, image, badge, tag, verification, status, description, lat, lng, location } = req.body || {};
     const nextLat = Number(location?.lat ?? lat ?? -6.7924);
     const nextLng = Number(location?.lng ?? lng ?? 39.2083);
@@ -1202,10 +2162,10 @@ export const createApp = () => {
       try {
         const client = await getPostgresClient();
         const query = `
-          INSERT INTO listings (title, city, price, period, image, badge, tag, verification, status, description, lat, lng)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          INSERT INTO listings (title, city, price, period, image, badge, tag, verification, status, description, lat, lng, approval_status, created_by, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'Pending', $9, $10, $11, 'Pending', $12, NOW())
         `;
-        await client.query(query, [title, city, price, period || 'On request', image || 'https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=900&q=80', badge || 'New', tag || 'Verified', verification || 'Ready for intake', status || 'New', description || 'Fresh listing added from FLX operations.', nextLat, nextLng]);
+        await client.query(query, [title, city, price, period || 'On request', image || 'https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=900&q=80', badge || 'New', tag || '', verification || '', description || '', nextLat, nextLng, req.adminActor.userId]);
         const result = await client.query('SELECT * FROM listings ORDER BY id ASC');
         return res.status(201).json({ ok: true, properties: result.rows.map(normalizeListingRow) });
       } catch (error) {
@@ -1215,8 +2175,8 @@ export const createApp = () => {
 
     const nextId = db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS nextId FROM listings').get().nextId;
     db.prepare(`
-      INSERT INTO listings (id, title, city, price, period, image, badge, tag, verification, status, description, lat, lng)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO listings (id, title, city, price, period, image, badge, tag, verification, status, description, lat, lng, approval_status, created_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', ?, ?, ?, 'Pending', ?, ?)
     `).run(
       nextId,
       title,
@@ -1225,19 +2185,20 @@ export const createApp = () => {
       period || 'On request',
       image || 'https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=900&q=80',
       badge || 'New',
-      tag || 'Verified',
-      verification || 'Ready for intake',
-      status || 'New',
-      description || 'Fresh listing added from FLX operations.',
+      tag || '',
+      verification || '',
+      description || '',
       Number.isFinite(nextLat) ? nextLat : -6.7924,
       Number.isFinite(nextLng) ? nextLng : 39.2083,
+      req.adminActor.userId,
+      new Date().toISOString(),
     );
 
     const rows = db.prepare('SELECT * FROM listings ORDER BY id ASC').all().map(normalizeListingRow);
     res.status(201).json({ ok: true, properties: rows });
   });
 
-  app.put('/api/admin/properties/:id', requireCrmAccess, async (req, res) => {
+  app.put('/api/admin/properties/:id', requireAdmin, async (req, res) => {
     const { id } = req.params;
     const { title, city, price, period, image, badge, tag, verification, status, description, lat, lng, location } = req.body || {};
     const nextLat = Number(location?.lat ?? lat ?? -6.7924);
@@ -1250,8 +2211,8 @@ export const createApp = () => {
       try {
         const client = await getPostgresClient();
         await client.query(
-          `UPDATE listings SET title = $1, city = $2, price = $3, period = $4, image = $5, badge = $6, tag = $7, verification = $8, status = $9, description = $10, lat = $11, lng = $12 WHERE id = $13`,
-          [title, city, price, period || 'On request', image || 'https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=900&q=80', badge || 'New', tag || 'Verified', verification || 'Ready for intake', status || 'New', description || 'Fresh listing added from FLX operations.', nextLat, nextLng, id],
+          `UPDATE listings SET title = $1, city = $2, price = $3, period = $4, image = $5, badge = $6, tag = $7, verification = $8, status = 'Pending', description = $9, lat = $10, lng = $11, approval_status = 'Pending', approved_by = NULL, approved_at = NULL, updated_at = NOW() WHERE id = $12`,
+          [title, city, price, period || 'On request', image || 'https://images.unsplash.com/photo-1484154218962-a197022b5858?auto=format&fit=crop&w=900&q=80', badge || 'New', tag || '', verification || '', description || '', nextLat, nextLng, id],
         );
         const result = await client.query('SELECT * FROM listings ORDER BY id ASC');
         return res.json({ ok: true, properties: result.rows.map(normalizeListingRow) });
@@ -1267,7 +2228,7 @@ export const createApp = () => {
 
     db.prepare(`
       UPDATE listings
-      SET title = ?, city = ?, price = ?, period = ?, image = ?, badge = ?, tag = ?, verification = ?, status = ?, description = ?, lat = ?, lng = ?
+      SET title = ?, city = ?, price = ?, period = ?, image = ?, badge = ?, tag = ?, verification = ?, status = 'Pending', description = ?, lat = ?, lng = ?, approval_status = 'Pending', approved_by = NULL, approved_at = NULL, updated_at = ?
       WHERE id = ?
     `).run(
       title,
@@ -1278,10 +2239,10 @@ export const createApp = () => {
       badge || current.badge || 'New',
       tag || current.tag || 'Verified',
       verification || current.verification || 'Ready for intake',
-      status || current.status || 'New',
       description || current.description || 'Fresh listing added from FLX operations.',
       Number.isFinite(nextLat) ? nextLat : current.lat ?? -6.7924,
       Number.isFinite(nextLng) ? nextLng : current.lng ?? 39.2083,
+      new Date().toISOString(),
       Number(id),
     );
 
@@ -1289,7 +2250,7 @@ export const createApp = () => {
     res.json({ ok: true, properties: rows });
   });
 
-  app.delete('/api/admin/properties/:id', requireCrmAccess, async (req, res) => {
+  app.delete('/api/admin/properties/:id', requireAdmin, async (req, res) => {
     const { id } = req.params;
 
     if (isPostgresMode) {
@@ -1331,15 +2292,58 @@ export const createApp = () => {
     res.json({ saved: true, savedIds });
   });
 
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body || {};
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-    const user = db.prepare('SELECT id, name, email, role FROM users WHERE email = ? AND password = ?').get(String(email).trim().toLowerCase(), String(password));
-    if (!user) {
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const nowMs = Date.now();
+    const attemptKey = `${req.ip || req.socket.remoteAddress}:${normalizedEmail}`;
+    const priorAttempts = loginFailures.get(attemptKey);
+    const attempts = !priorAttempts || nowMs - priorAttempts.startedAt > 15 * 60 * 1000
+      ? { count: 0, startedAt: nowMs }
+      : priorAttempts;
+    if (attempts.count >= 5) return res.status(429).json({ error: 'Too many sign-in attempts. Try again in 15 minutes.' });
+    let user;
+    if (isPostgresMode) {
+      try {
+        const client = await getPostgresClient();
+        const result = await client.query('SELECT * FROM users WHERE email = $1', [normalizedEmail]);
+        user = result.rows[0];
+      } catch (error) {
+        return res.status(503).json({ error: error instanceof Error ? error.message : 'Authentication service unavailable.' });
+      }
+    } else user = db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
+
+    if (!user || !(await verifyPassword(password, user.password))) {
+      loginFailures.set(attemptKey, { count: attempts.count + 1, startedAt: attempts.startedAt });
       return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+    loginFailures.delete(attemptKey);
+    if (user.approval_status !== 'Approved') {
+      return res.status(403).json({ approval_required: true, approval_status: user.approval_status, error: user.approval_status === 'Rejected' ? 'This account application was not approved. Contact FLX support.' : 'Your account is awaiting FLX approval.' });
+    }
+
+    const now = new Date().toISOString();
+    if (!String(user.password).startsWith('scrypt$')) {
+      user.password = await hashPassword(password);
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        await client.query('UPDATE users SET password = $1 WHERE id = $2', [user.password, user.id]);
+      } else db.prepare('UPDATE users SET password = ? WHERE id = ?').run(user.password, user.id);
+    }
+    if (isPostgresMode) {
+      const client = await getPostgresClient();
+      await client.query('UPDATE users SET last_login_at = $1 WHERE id = $2', [now, user.id]);
+      await client.query('INSERT INTO login_events (user_id, event_type, created_at) VALUES ($1, $2, $3)', [user.id, 'login', now]);
+    } else {
+      const transaction = db.transaction(() => {
+        db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').run(now, user.id);
+        db.prepare('INSERT INTO login_events (user_id, event_type, created_at) VALUES (?, ?, ?)').run(user.id, 'login', now);
+      });
+      transaction();
     }
 
     const token = createSessionToken(user);
@@ -1352,40 +2356,127 @@ export const createApp = () => {
         name: user.name,
         email: user.email,
         role: user.role,
+        phone: user.phone || '',
+        profile_picture: user.profile_picture || '',
+        client_category: user.client_category || '',
+        approval_status: user.approval_status,
       },
     });
   });
 
-  app.post('/api/auth/register', (req, res) => {
-    const { name, email, password, role } = req.body || {};
+  app.post('/api/auth/register', async (req, res) => {
+    const { name, email, password, role, client_category: clientCategory, phone } = req.body || {};
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Name, email, and password are required.' });
     }
+    if (String(password).length < 6) return res.status(400).json({ error: 'Use a password with at least 6 characters.' });
 
     const normalizedEmail = String(email).trim().toLowerCase();
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
+    const requestedRole = String(role || 'Client');
+    const clientCategories = ['University scholar (hostel)', 'Frame (business space)', 'Apartment (residential tenants)', 'Land or property buyers'];
+    if (!['Client', 'Owner', 'Agent', 'Investor'].includes(requestedRole)) {
+      return res.status(400).json({ error: 'Public registration is available for Client, Owner, Agent, or Investor accounts only.' });
+    }
+    if (requestedRole === 'Client' && !clientCategories.includes(clientCategory)) return res.status(400).json({ error: 'Choose a client account category.' });
+    const approvalStatus = ['Owner', 'Agent'].includes(requestedRole) ? 'Pending' : 'Approved';
+    const passwordHash = await hashPassword(password);
+    const now = new Date().toISOString();
+    let existing;
+    if (isPostgresMode) {
+      try {
+        const client = await getPostgresClient();
+        const result = await client.query('SELECT id FROM users WHERE email = $1', [normalizedEmail]);
+        existing = result.rows[0];
+      } catch (error) {
+        return res.status(503).json({ error: error instanceof Error ? error.message : 'Registration service unavailable.' });
+      }
+    } else existing = db.prepare('SELECT id FROM users WHERE email = ?').get(normalizedEmail);
     if (existing) {
       return res.status(409).json({ error: 'Account already exists for that email.' });
     }
 
-    const result = db.prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)').run(String(name).trim(), normalizedEmail, String(password), String(role || 'Client'));
-    const user = db.prepare('SELECT id, name, email, role FROM users WHERE id = ?').get(result.lastInsertRowid);
+    let user;
+    if (isPostgresMode) {
+      try {
+        const client = await getPostgresClient();
+        const result = await client.query(`
+          INSERT INTO users (name, email, password, role, phone, client_category, approval_status, approved_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, CASE WHEN $7 = 'Approved' THEN NOW() ELSE NULL END)
+          RETURNING id, name, email, role, phone, client_category, approval_status
+        `, [String(name).trim(), normalizedEmail, passwordHash, requestedRole, String(phone || '').trim(), requestedRole === 'Client' ? clientCategory : '', approvalStatus]);
+        user = result.rows[0];
+        await client.query('INSERT INTO login_events (user_id, event_type, created_at) VALUES ($1, $2, $3)', [user.id, 'signup', now]);
+      } catch (error) {
+        if (error?.code === '23505') return res.status(409).json({ error: 'Account already exists for that email.' });
+        return res.status(503).json({ error: error instanceof Error ? error.message : 'Registration service unavailable.' });
+      }
+    } else {
+      const result = db.prepare(`
+        INSERT INTO users (name, email, password, role, phone, client_category, approval_status, approved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(String(name).trim(), normalizedEmail, passwordHash, requestedRole, String(phone || '').trim(), requestedRole === 'Client' ? clientCategory : '', approvalStatus, approvalStatus === 'Approved' ? now : null);
+      user = db.prepare('SELECT id, name, email, role, phone, client_category, approval_status FROM users WHERE id = ?').get(result.lastInsertRowid);
+      db.prepare('INSERT INTO login_events (user_id, event_type, created_at) VALUES (?, ?, ?)').run(user.id, 'signup', now);
+    }
+    if (approvalStatus === 'Pending') {
+      return res.status(202).json({ ok: true, pending_approval: true, message: `Your ${requestedRole.toLowerCase()} account is waiting for FLX approval.`, user });
+    }
     const token = createSessionToken(user);
     res.status(201).json({ ok: true, token, user });
   });
 
-  app.get('/api/auth/session', (req, res) => {
+  app.get('/api/auth/session', async (req, res) => {
     const session = getSessionUser(req);
     if (!session) {
       return res.status(401).json({ error: 'No active session.' });
     }
 
-    const user = db.prepare('SELECT id, name, email, role FROM users WHERE email = ?').get(String(session.email).trim().toLowerCase());
+    let user;
+    if (isPostgresMode) {
+      try {
+        const client = await getPostgresClient();
+        const result = await client.query('SELECT id, name, email, role, phone, profile_picture, client_category, approval_status FROM users WHERE email = $1', [String(session.email).trim().toLowerCase()]);
+        user = result.rows[0];
+      } catch (error) {
+        return res.status(503).json({ error: error instanceof Error ? error.message : 'Authentication service unavailable.' });
+      }
+    } else user = db.prepare('SELECT id, name, email, role, phone, profile_picture, client_category, approval_status FROM users WHERE email = ?').get(String(session.email).trim().toLowerCase());
     if (!user) {
       return res.status(401).json({ error: 'Session user no longer exists.' });
     }
 
-    res.json({ ok: true, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    res.json({ ok: true, user: { id: user.id, name: user.name, email: user.email, role: user.role, phone: user.phone || '', profile_picture: user.profile_picture || '', client_category: user.client_category || '', approval_status: user.approval_status } });
+  });
+
+  app.patch('/api/auth/profile', async (req, res) => {
+    const session = getSessionUser(req);
+    if (!session) return res.status(401).json({ error: 'Sign in to edit your profile.' });
+    const name = String(req.body?.name || '').trim();
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const phone = String(req.body?.phone || '').trim();
+    const profilePicture = req.body?.profile_picture == null ? undefined : String(req.body.profile_picture);
+    if (!name || !email) return res.status(400).json({ error: 'Name and email are required.' });
+    if (profilePicture && (!/^data:image\/(?:png|jpeg|webp);base64,/.test(profilePicture) || profilePicture.length > 1_500_000)) return res.status(400).json({ error: 'Profile photos must be PNG, JPEG, or WebP under 1 MB.' });
+
+    try {
+      let user;
+      if (isPostgresMode) {
+        const client = await getPostgresClient();
+        const result = await client.query('UPDATE users SET name=$1,email=$2,phone=$3,profile_picture=COALESCE($4,profile_picture) WHERE id=$5 RETURNING id,name,email,role,phone,profile_picture,client_category,approval_status', [name, email, phone, profilePicture, session.userId]);
+        user = result.rows[0];
+      } else {
+        db.prepare('UPDATE users SET name=?,email=?,phone=?,profile_picture=COALESCE(?,profile_picture) WHERE id=?').run(name, email, phone, profilePicture ?? null, session.userId);
+        user = db.prepare('SELECT id,name,email,role,phone,profile_picture,client_category,approval_status FROM users WHERE id=?').get(session.userId);
+      }
+      if (!user) return res.status(404).json({ error: 'Account not found.' });
+      session.email = user.email;
+      session.name = user.name;
+      session.picture = user.profile_picture || '';
+      return res.json({ ok: true, user });
+    } catch (error) {
+      if (error?.code === '23505' || String(error?.code) === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ error: 'That email is already in use.' });
+      return res.status(500).json({ error: 'Unable to update profile.' });
+    }
   });
 
   app.post('/api/auth/logout', (req, res) => {
@@ -1395,7 +2486,7 @@ export const createApp = () => {
     res.json({ ok: true });
   });
 
-  app.post('/api/units', (req, res) => {
+  app.post('/api/units', requireAdmin, (req, res) => {
     const { title, city, price, period, image, badge, tag, verification, status, description } = req.body || {};
     if (!title || !city || !price) {
       return res.status(400).json({ error: 'Title, city and price are required.' });
@@ -1438,8 +2529,15 @@ const isDirectRun = (() => {
 })();
 
 if (isDirectRun) {
-  const app = createApp();
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Backend running on http://localhost:${PORT}`);
+  const startServer = async () => {
+    if (isPostgresMode) await ensurePostgresSeedData();
+    const app = createApp();
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Backend running on http://localhost:${PORT} (${isPostgresMode ? 'postgres' : 'sqlite'})`);
+    });
+  };
+  startServer().catch((error) => {
+    console.error('Backend startup failed:', error);
+    process.exitCode = 1;
   });
 }

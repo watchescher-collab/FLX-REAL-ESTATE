@@ -116,6 +116,8 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
+  phone?: string;
+  clientCategory?: string;
   password?: string;
   picture?: string;
   role?: 'Agent' | 'Investor' | 'Owner' | 'Admin' | 'Client';

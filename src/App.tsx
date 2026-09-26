@@ -143,7 +143,7 @@ type OwnerPortfolio = {
 const BrandWordmark = ({ compact = false }: { compact?: boolean }) => (
   <div className={`fx-brand-wordmark ${compact ? 'fx-brand-wordmark--compact' : ''}`}>
     <img
-      src={compact ? '/assets/flx-logo-mark.svg' : '/assets/flx-logo-wordmark.svg'}
+      src={compact ? '/assets/flx-logo-round.jpeg' : '/assets/flx-logo-wordmark.png'}
       alt="FLX Real Estate"
     />
   </div>
@@ -1522,7 +1522,7 @@ function App() {
     <div className="fx-landing-shell">
       <header className="fx-landing-header">
         <div className="fx-landing-brand">
-          <img src="/assets/flx-logo-wordmark.svg" alt="FLX Real Estate" />
+          <img src="/assets/flx-logo-wordmark.png" alt="FLX Real Estate" />
         </div>
 
         <nav className="fx-landing-nav" aria-label="Landing page navigation">

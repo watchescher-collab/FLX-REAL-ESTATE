@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "name": "FLX Real Estate",
+  "short_name": "FLX Real Estate",
+  "description": "Find, invest, and live better with FLX Real Estate.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/assets/flx-logo-round.jpeg",
+      "sizes": "1254x1254",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+.workspace-access-page { display: grid; min-height: 100dvh; place-items: center; padding: 20px; background: #f5f5f5; color: #111; }
+.workspace-access-page > p { color: #555; font-size: 13px; }
+.workspace-access-page > section { display: grid; justify-items: center; width: min(100%, 460px); gap: 11px; padding: 26px; border: 1px solid #dedede; border-radius: 7px; background: #fff; text-align: center; }
+.workspace-access-page > section img { width: 54px; height: 54px; object-fit: contain; }
+.workspace-access-page > section > span { color: #c4121a; font-size: 10px; font-weight: 900; letter-spacing: .12em; }
+.workspace-access-page h1 { margin: 0; font-size: 22px; line-height: 1.2; }
+.workspace-access-page p { margin: 0; color: #555; font-size: 13px; line-height: 1.5; }
+.workspace-access-page button { min-height: 40px; padding: 0 15px; border: 1px solid #c4121a; border-radius: 4px; background: #c4121a; color: #fff; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+.workspace-access-page > section > a { color: #333; font-size: 12px; text-decoration: none; }
+.workspace-access-page > section > a:hover { color: #c4121a; }

@@ -4,10 +4,19 @@ import { RealEstateLeafletMap } from "./components/RealEstateLeafletMap";
 import { HostelDetailPage } from "./components/HostelDetailPage";
 import { MarketplaceClientFlow } from "./components/MarketplaceClientFlow";
 import { OwnerDataStatusPage } from "./components/OwnerDataStatusPage";
+import { PropertyManagementPage } from "./components/PropertyManagementPage";
+import { InvestorWorkspacePage } from "./components/InvestorWorkspacePage";
+import { LocalAuthModal } from "./components/LocalAuthModal";
+import { WorkspaceAccountMenu, WorkspaceTopBar } from "./components/WorkspaceChrome";
+import { AdminAccountsPage } from "./components/AdminAccountsPage";
 import { LegalEscrowStatusPage } from "./components/LegalEscrowStatusPage";
+import { LegalEscrowConsolePage } from "./components/LegalEscrowConsolePage";
 import { CadastralDiligencePage } from "./components/CadastralDiligencePage";
+import "./components/workspaceAccess.css";
 import "./components/opsControl.css";
 import { getStoredToken, signIn as signInApi, signOut as signOutApi } from "./auth";
+import { useAuth } from "./context/AuthContext";
+import { useLocation } from "react-router-dom";
 import type { Property } from "./types";
 import {
   Activity,
@@ -239,8 +248,8 @@ const defaultProfilePhoto = "https://images.unsplash.com/photo-1494790108377-be9
 function FlxMark() {
   return (
     <div className="os-brand">
-      <span className="os-brand-mark">FLX</span>
-      <span>REALTY TZ</span>
+      <img src="/assets/flx-logo-round.jpeg" alt="" />
+      <span>REAL ESTATE</span>
     </div>
   );
 }
@@ -248,11 +257,9 @@ function FlxMark() {
 function TopBar({
   role,
   onRole,
-  onProfile,
 }: {
   role: Role;
   onRole: (role: Role) => void;
-  onProfile: () => void;
 }) {
   const productLinks: Array<{ label: string; target: Role }> =
     role === "Explore"
@@ -318,10 +325,7 @@ function TopBar({
           <button className="os-icon-button" aria-label="Notifications">
             <Bell size={17} />
           </button>
-          <button className="os-avatar" onClick={onProfile} aria-label="Open profile menu">
-            <img src={defaultProfilePhoto} alt="" onError={(event) => { event.currentTarget.style.display = "none"; event.currentTarget.nextElementSibling?.classList.add("is-visible"); }} />
-            <span>NJ</span>
-          </button>
+          <WorkspaceAccountMenu />
         </div>
       </div>
       {role !== "Explore" ? (
@@ -725,6 +729,11 @@ function AgentScreen({ activeView, dashboard, onAddLead, onUpdateLeadStage, onBu
         <section className="os-ledger-card">
           <div className="os-section-heading"><h2><Landmark size={17} /> Commission ledger</h2><span>Unavailable</span></div>
           <p className="crm-ledger-notice">No verified transaction or payout connector is configured. Commission balances and cashout are disabled.</p>
+        </section>
+        <section className="os-utility-card crm-property-workbench-card">
+          <div className="os-section-heading"><h2><Building2 size={17} /> Property records</h2><span>Field listings</span></div>
+          <p>Create or update a property after the site visit. New and changed details remain private until Admin approval.</p>
+          <a href="/properties/manage">Open property workbench <ArrowRight size={15} /></a>
         </section>
         <section className="os-utility-card">
           <div className="os-section-heading"><h2><UsersRound size={17} /> Qualify a lead</h2><span>CRM record</span></div>
@@ -1462,25 +1471,72 @@ function ProfileModal({
 }
 
 export default function FlxOsApp() {
-  if (window.location.pathname === '/hostel/milimani') {
+  const location = useLocation();
+  const pathname = location.pathname;
+
+  if (pathname === '/admin' || pathname === '/admin/dashboard' || pathname === '/admin/accounts') {
+    return <AdminAccountsPage />;
+  }
+
+  if (pathname === '/investor/opportunities') {
+    return <InvestorWorkspacePage />;
+  }
+
+  if (pathname === '/hostel/milimani') {
     return <HostelDetailPage />;
   }
 
-  if (window.location.pathname === '/owner' || window.location.pathname === '/owner/dashboard') {
+  if (pathname === '/owner' || pathname === '/owner/dashboard') {
     return <OwnerDataStatusPage />;
   }
 
-  if (window.location.pathname === '/legal' || window.location.pathname === '/legal/escrow') {
-    return <LegalEscrowStatusPage />;
+  if (pathname === '/properties/manage') {
+    return <PropertyManagementPage />;
   }
 
-  if (window.location.pathname === '/cadastral' || window.location.pathname === '/land/gezaulole') {
+  if (pathname === '/legal' || pathname === '/legal/escrow' || pathname === '/legal/status') {
+    return <LegalEscrowConsolePage />;
+  }
+
+  if (pathname === '/cadastral' || pathname === '/land/gezaulole') {
     return <CadastralDiligencePage />;
   }
 
-  if (window.location.pathname === '/' || window.location.pathname === '/marketplace') {
+  if (pathname === '/' || pathname === '/marketplace') {
     return <MarketplaceClientFlow />;
   }
+
+  const roleHash = location.hash.replace(/^#/, '').toLowerCase();
+  const requiredRole = pathname === '/agent/intake' || (pathname === '/workspace' && roleHash === 'agent')
+    ? 'Agent'
+    : pathname === '/owner/portfolio' || (pathname === '/workspace' && roleHash === 'owner')
+      ? 'Owner'
+      : undefined;
+  return <WorkspaceRoleRoute requiredRole={requiredRole} />;
+}
+
+function WorkspaceRoleRoute({ requiredRole }: { requiredRole?: 'Agent' | 'Owner' }) {
+  const { user, isLoading, openAuthModal } = useAuth();
+
+  if (isLoading) return <main className="workspace-access-page"><p>Checking your FLX account…</p></main>;
+  if (requiredRole && user?.role !== requiredRole) {
+    return <main className="workspace-access-page">
+      <section>
+        <img src="/assets/flx-logo-round.jpeg" alt="FLX Real Estate" />
+        <span>FLX WORKSPACE ACCESS</span>
+        <h1>{user ? `${requiredRole} account required` : `Sign in to your ${requiredRole.toLowerCase()} workspace`}</h1>
+        <p>{user ? 'This account does not have access to this workspace.' : 'Use the approved account for this workspace to continue.'}</p>
+        <button type="button" onClick={openAuthModal}>{user ? 'Switch account' : 'Sign in'}</button>
+        <a href="/marketplace">Back to FLX marketplace</a>
+      </section>
+      <LocalAuthModal />
+    </main>;
+  }
+
+  return <WorkspaceDashboard />;
+}
+
+function WorkspaceDashboard() {
 
   const emptyClientDashboard: ClientDashboard = { stats: [], reminders: [], tickets: [] };
   const emptyAgentDashboard: AgentDashboard = { stats: [], leads: [], deals: [], contracts: [] };
@@ -1493,6 +1549,8 @@ export default function FlxOsApp() {
   const [opsDashboard, setOpsDashboard] = useState<OpsDashboard>(emptyOpsDashboard);
 
   const resolveRoleFromHash = () => {
+    if (window.location.pathname === '/agent/intake') return 'Agent';
+    if (window.location.pathname === '/owner/portfolio') return 'Owner';
     const raw = window.location.hash.replace(/^#/, "").toLowerCase();
     if (!raw || raw === "explore") return "Explore";
     if (raw === "client") return "Client";
@@ -1505,7 +1563,7 @@ export default function FlxOsApp() {
   const [role, setRole] = useState<Role>(resolveRoleFromHash());
   const [listings, setListings] = useState<Listing[]>(fallbackListings);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const { signOut } = useAuth();
   const [activeView, setActiveView] = useState<Record<Role, string>>({
     Explore: "market",
     Client: "home",
@@ -1522,7 +1580,11 @@ export default function FlxOsApp() {
 
     syncRoleFromHash();
     window.addEventListener("hashchange", syncRoleFromHash);
-    return () => window.removeEventListener("hashchange", syncRoleFromHash);
+    window.addEventListener("popstate", syncRoleFromHash);
+    return () => {
+      window.removeEventListener("hashchange", syncRoleFromHash);
+      window.removeEventListener("popstate", syncRoleFromHash);
+    };
   }, []);
 
   useEffect(() => {
@@ -1767,14 +1829,13 @@ export default function FlxOsApp() {
   };
 
   const goToRole = (nextRole: Role) => {
-    setIsProfileOpen(false);
     setSelectedListing(null);
     if (nextRole === role) return;
     const destinations: Record<Role, string> = {
       Explore: "/#marketplace",
       Client: "/#marketplace",
-      Agent: "/workspace#agent",
-      Owner: "/owner",
+      Agent: "/agent/intake",
+      Owner: "/owner/portfolio",
       Ops: "/workspace#ops",
     };
     window.location.assign(destinations[nextRole]);
@@ -1807,7 +1868,7 @@ export default function FlxOsApp() {
 
   return (
     <div className="os-app">
-      <TopBar role={role} onRole={goToRole} onProfile={() => setIsProfileOpen(true)} />
+      <TopBar role={role} onRole={goToRole} />
       {currentScreen}
       <nav className={`os-bottom-nav ${role === "Explore" ? "os-explore-nav" : ""} ${role === "Owner" ? "os-owner-nav" : ""}`}>
         {roleNavItems[role].map(({ id, role: navRole, label, icon: Icon }) => (
@@ -1834,19 +1895,6 @@ export default function FlxOsApp() {
         <DetailModal
           listing={selectedListing}
           onClose={() => setSelectedListing(null)}
-        />
-      ) : null}
-      {isProfileOpen ? (
-        <ProfileModal
-          role={role}
-          onRole={goToRole}
-          onClose={() => setIsProfileOpen(false)}
-          onSignOut={() => {
-            signOutApi();
-            localStorage.removeItem("flx-user");
-            localStorage.removeItem("flx_local_session");
-            window.location.assign("/");
-          }}
         />
       ) : null}
     </div>

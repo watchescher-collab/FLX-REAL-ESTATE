@@ -1,0 +1,33 @@
+.investor-workspace-page { min-height: 100dvh; background: #f5f5f5; color: #111; }
+.investor-workspace-header { position: sticky; top: 0; z-index: 20; display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 14px; padding: 8px max(16px, calc((100% - 1220px) / 2)); border-bottom: 1px solid #dedede; background: rgba(255,255,255,.96); }
+.investor-workspace-header > a, .investor-workspace-header > div { display: flex; align-items: center; gap: 8px; color: #151515; font-size: 12px; font-weight: 800; text-decoration: none; }
+.investor-workspace-header > a svg { color: #c4121a; }
+.investor-workspace-header > div { color: #555; font-weight: 500; }
+.investor-workspace-header button { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid #dedede; border-radius: 5px; background: #fff; color: #c4121a; cursor: pointer; }
+.investor-workspace-main { width: min(100% - 32px, 1220px); margin: 0 auto; padding: 34px 0 64px; }
+.investor-workspace-heading { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
+.investor-workspace-heading > div > span { color: #c4121a; font-size: 10px; font-weight: 900; letter-spacing: .1em; }
+.investor-workspace-heading h1 { margin: 6px 0 0; font-size: clamp(24px, 3vw, 34px); line-height: 1.15; }
+.investor-workspace-heading p { margin: 7px 0 0; color: #5c5c5c; font-size: 13px; }
+.investor-workspace-heading > strong { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; color: #bd1019; font-size: 12px; }
+.investor-opportunity-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+.investor-opportunity { overflow: hidden; border: 1px solid #dedede; border-radius: 6px; background: #fff; }
+.investor-opportunity > img, .investor-opportunity-placeholder { display: grid; width: 100%; height: 210px; place-items: center; background: #e8e8e8; object-fit: cover; }
+.investor-opportunity-placeholder { color: #c4121a; }
+.investor-opportunity-body { padding: 15px; }
+.investor-opportunity-meta { display: flex; justify-content: space-between; gap: 10px; color: #b51119; font-size: 10px; font-weight: 800; }
+.investor-opportunity-meta span:last-child { overflow: hidden; color: #666; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.investor-opportunity h2 { margin: 9px 0 5px; font-size: 17px; }
+.investor-opportunity-body > p { min-height: 38px; margin: 0; color: #555; font-size: 12px; line-height: 1.5; }
+.investor-opportunity-footer { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 13px; padding-top: 10px; border-top: 1px solid #eee; }
+.investor-opportunity-footer strong { color: #c4121a; font-size: 15px; }
+.investor-opportunity-footer span { color: #666; font-size: 11px; }
+.investor-workspace-empty, .investor-workspace-access { display: grid; justify-items: center; gap: 10px; padding: 36px 22px; border: 1px solid #dedede; border-radius: 6px; background: #fff; text-align: center; }
+.investor-workspace-empty > svg, .investor-workspace-access > svg { color: #c4121a; }
+.investor-workspace-empty h2, .investor-workspace-access h1 { margin: 0; font-size: 19px; }
+.investor-workspace-empty p, .investor-workspace-access p { max-width: 480px; margin: 0; color: #555; font-size: 13px; line-height: 1.5; }
+.investor-workspace-empty a, .investor-workspace-access button { display: inline-flex; min-height: 38px; align-items: center; gap: 6px; margin-top: 4px; padding: 0 12px; border: 1px solid #c4121a; border-radius: 4px; background: #c4121a; color: #fff; font: inherit; font-size: 12px; font-weight: 750; text-decoration: none; cursor: pointer; }
+.investor-workspace-access { width: min(100% - 32px, 520px); margin: 12vh auto; padding: 30px; }
+.investor-workspace-state { width: min(100% - 32px, 1220px); margin: 24px auto; color: #555; font-size: 13px; }
+.investor-workspace-error { padding: 10px 12px; border: 1px solid #c4121a; background: #fff; color: #b10d16; font-size: 12px; }
+@media (max-width: 600px) { .investor-workspace-main { width: min(100% - 20px, 500px); padding-top: 22px; }.investor-workspace-heading { align-items: flex-start; flex-direction: column; }.investor-opportunity > img, .investor-opportunity-placeholder { height: 190px; }.investor-opportunity-body > p { min-height: 0; } }
